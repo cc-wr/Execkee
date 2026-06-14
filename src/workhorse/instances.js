@@ -46,6 +46,7 @@ export class InstanceManager {
 
     addInstance(tracking, record);
     writeTracking(tracking);
+    this._applyVisibility(record.windowHandle, record.visibility);
     this._startMonitor(id);
     return record;
   }
@@ -70,6 +71,7 @@ export class InstanceManager {
 
     addInstance(tracking, record);
     writeTracking(tracking);
+    this._applyVisibility(record.windowHandle, record.visibility);
     this._startMonitor(id);
     return record;
   }
@@ -184,7 +186,22 @@ export class InstanceManager {
       crashCount: inst.crashCount || 0,
     });
     writeTracking(tracking);
+    // Restore the instance's prior visibility (§4.6a): a recovered crash should
+    // come back the way it was, not forced visible.
+    this._applyVisibility(launched.windowHandle, inst.visibility);
     this._startMonitor(inst.id);
+  }
+
+  // Make the physical window match the tracked visibility. Managed/created
+  // instances default to hidden (§4.6b: adopted hidden, available to the
+  // subcontroller); crash-recovery passes the prior visibility.
+  _applyVisibility(windowHandle, visibility) {
+    if (!windowHandle) return;
+    if (visibility === VISIBILITY.FOREGROUND) {
+      adapter.showWindow(windowHandle);
+    } else {
+      adapter.hideWindow(windowHandle);
+    }
   }
 
   _startMonitor(instanceId) {
