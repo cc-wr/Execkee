@@ -445,3 +445,29 @@ Before any real cross-machine setup, run **both roles on the same machine** — 
 **What it does *not* validate (revisit when a second machine joins):** true network behavior (latency, partitions, reconnection), real dead-workhorse detection, genuine `.claude` propagation across distinct filesystems, and heterogeneous-OS adapters.
 
 **Exit criteria to leave Phase 0:** an instance can be created, used, hidden, **reported on via headless fork (working session verified untouched)**, foregrounded, crashed-and-auto-resumed, and intentionally closed — and a full 30-minute cycle produces a correct dashboard with a conversational sentence you can resolve via the primary. Only then introduce a genuinely separate workhorse.
+
+---
+
+## Codicil A — Phase-0 Implementation Decisions (recorded 2026-06-14)
+
+*This codicil records decisions and empirical findings from the first Phase-0 build. It amends the sections noted; it does not revise the body above. Where a finding resolves an Open Question (§7), that is stated.*
+
+**A.1 Implementation stack.** Node.js. File-based shared store under `~/.execkee` (tracking, shared-store, life-tasks). Transport is a WebSocket server↔subcontroller channel; the dashboard is served over HTTP with Server-Sent Events for push. No external dependencies beyond `ws`.
+
+**A.2 Fork spike — PASSED; close/resume fallback not needed (resolves §7 Q0).** `claude -p --resume <id> --fork-session --no-session-persistence --output-format json` was run against a real session whose GUI was open; it produced a complete report and left the working session **byte-identical**. The pure-fork path of §4.3 is therefore the only path; the close/resume fallback (§4.2, §4.3, §9) is confirmed unnecessary on native Windows and is not implemented.
+
+**A.3 Native-Windows window management (amends §4.1, §6b; resolves §7 Q2).** The interactive instance is launched as `claude.exe` **directly** via `Start-Process -PassThru` — *not* wrapped in `cmd`. The launched PID is the durable, window-owning process (no "trampoline"; `conhost` is its child). Its `MainWindowHandle` is non-zero **only while visible** and reads 0 once hidden, so the handle is **cached at launch** and reused; liveness is checked by PID, hide/show by the cached handle, kill by `taskkill /T`. There is no separate "held" state in the pure-fork path.
+
+**A.4 The application wrapper is realized via a session-scoped hook (amends §4.1, §4.6a, §2a).** In-instance typed `hide`/`close` are implemented with a `UserPromptSubmit` hook injected per-instance through `claude --settings <file>` plus an `EXECKEE_INSTANCE_ID` environment variable. The user's global `~/.claude` is never modified. Typing `hide` backgrounds the instance and blocks the prompt; typing `close` sets `desiredState=closing` locally before exit (preserving the §4.6a invariant that a bare exit is never a close), and the subcontroller finalizes the kill.
+
+**A.5 X-button — accepted deviation (amends §4.1, §6b).** Actively "backgrounding on X" cannot be done for a console window from outside its process; it would require hosting the instance in a custom GUI terminal. Decision: the window's `SC_CLOSE` menu item is **removed at launch** so the X can never *kill* the instance (the load-bearing permanence invariant holds). Backgrounding is via typed `hide` or the primary. True X-to-hide is deferred to a future GUI-host wrapper.
+
+**A.6 Resolution loop (amends §4.10).** `/api/resolve` mutates the dashboard only when the caller (the primary) asserts an explicit `resolved: true` — the resolved-vs-discussion judgment stays with the primary; the server applies no keyword heuristic. On resolution it promotes the next pre-staged secondary sentence (or "Stand by."), writes the shared store, and pushes SSE. Both writer paths (cycle and resolution) push live.
+
+**A.7 Adoption is atomic (amends §4.6b).** `manage` verifies the session exists on disk before adopting and persists the tracking record only after a verified-live launch — no orphan records on failure. The watermark defaults to "now"; `--baseline` opts into a from-start report; `--open` adopts an already-open session as foreground (un-launched, un-supervised) per the secondary case.
+
+**A.8 On-demand cycle.** A `POST /api/run-cycle` trigger supplements the 30-minute timer (a "refresh now" affordance; also the deterministic hook used for validation).
+
+**A.9 Output-format convention.** `claude -p --output-format json` returns a JSON **array of event objects**; the model's answer is the `result` field of the final `type:"result"` event. Both the report fork and the cycle synthesis parse it this way.
+
+**A.10 Phase-0 validation.** The full loop was exercised end-to-end: create / hide / fork-report (working session untouched) / foreground / crash-and-auto-resume / intentional close (primary and in-instance) / a cycle that synthesizes a report + tasks into time-aware sentences / resolve via the primary with live SSE promotion. Deferred to Phase 1 (consistent with §9): cross-filesystem `.claude` sync, per-workhorse tracking mirror, real network/dead-workhorse behavior, heterogeneous-OS adapters.
