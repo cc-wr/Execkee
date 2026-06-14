@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import config from '../common/config.js';
 import { CMD } from '../common/protocol.js';
+import { killActiveClaudeRuns } from '../common/exec-async.js';
 import { ServerConnection } from './connection.js';
 import { InstanceManager } from './instances.js';
 
@@ -88,6 +89,7 @@ const stateInterval = setInterval(() => {
 function shutdown() {
   console.log('[workhorse] Shutting down...');
   clearInterval(stateInterval);
+  killActiveClaudeRuns(); // kill any in-flight report fork
   instanceManager.stopAll();
   connection.disconnect();
   process.exit(0);

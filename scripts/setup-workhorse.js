@@ -41,7 +41,7 @@ if (!existsSync(config.DATA_DIR)) {
   mkdirSync(config.DATA_DIR, { recursive: true });
 }
 
-const workhouseConfig = {
+const workhorseConfig = {
   workhorseId,
   name: workhorseName,
   serverUrl,
@@ -50,7 +50,7 @@ const workhouseConfig = {
 };
 
 const configPath = join(config.DATA_DIR, 'workhorse-config.json');
-writeFileSync(configPath, JSON.stringify(workhouseConfig, null, 2), 'utf-8');
+writeFileSync(configPath, JSON.stringify(workhorseConfig, null, 2), 'utf-8');
 console.log(`Config written to: ${configPath}`);
 
 console.log('');

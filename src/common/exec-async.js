@@ -20,6 +20,17 @@ export function execAsync(cmd, options = {}) {
   });
 }
 
+// Active `claude` children, so a shutdown can kill any in-flight report fork
+// instead of leaving it to its 120s timeout or OS orphan reaping.
+const activeClaudeChildren = new Set();
+
+export function killActiveClaudeRuns() {
+  for (const child of activeClaudeChildren) {
+    try { child.kill(); } catch {}
+  }
+  activeClaudeChildren.clear();
+}
+
 export function claudeRun(args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn('claude', args, {
@@ -27,6 +38,7 @@ export function claudeRun(args, options = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
       ...options,
     });
+    activeClaudeChildren.add(child);
 
     let stdout = '';
     let stderr = '';
@@ -40,6 +52,7 @@ export function claudeRun(args, options = {}) {
 
     child.on('close', code => {
       clearTimeout(timer);
+      activeClaudeChildren.delete(child);
       if (code === 0) {
         resolve(stdout);
       } else {
@@ -52,6 +65,7 @@ export function claudeRun(args, options = {}) {
 
     child.on('error', err => {
       clearTimeout(timer);
+      activeClaudeChildren.delete(child);
       reject(err);
     });
   });
