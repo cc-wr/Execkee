@@ -36,6 +36,8 @@ export function createInstanceRecord({ id, workhorseId, name, projectPath, sessi
     sessionId,
     desiredState: DESIRED_STATE.ALIVE,
     visibility: visibility || VISIBILITY.HIDDEN,
+    pid: null,
+    windowHandle: null,
     heldBySubcontroller: false,
     watermark: { position: 0, timestamp: null },
     lastReportTime: null,

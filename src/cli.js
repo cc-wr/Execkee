@@ -102,12 +102,19 @@ switch (cmd) {
   }
 
   case 'manage': {
-    const [sessionId, ...nameParts] = args;
-    const name = nameParts.join(' ') || 'Managed Session';
+    const [sessionId, ...rest] = args;
     if (!sessionId) {
-      console.error('Usage: manage <session-id> [name]');
+      console.error('Usage: manage <session-id> [name] [--path <project-path>]');
       process.exit(1);
     }
+    let name = 'Managed Session';
+    let projectPath = process.cwd();
+    const pathIdx = rest.indexOf('--path');
+    if (pathIdx >= 0) {
+      projectPath = rest[pathIdx + 1] || projectPath;
+      rest.splice(pathIdx, 2);
+    }
+    if (rest.length > 0) name = rest.join(' ');
     const state = await api('/api/state');
     const wh = state.workhorses?.[0];
     if (!wh) {
@@ -122,6 +129,7 @@ switch (cmd) {
       id: instanceId,
       name,
       sessionId,
+      projectPath,
     });
     console.log(result.success !== false ? `Managed as ${instanceId}` : `Failed: ${result.error}`);
     break;

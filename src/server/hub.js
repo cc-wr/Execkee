@@ -45,6 +45,15 @@ export class Hub {
             this._handleEvent(msg);
             break;
 
+          case MSG.ACK: {
+            const cb = this.pendingCallbacks.get(msg.requestId);
+            if (cb) {
+              this.pendingCallbacks.delete(msg.requestId);
+              cb({ success: msg.success, error: msg.error });
+            }
+            break;
+          }
+
           case MSG.PONG:
             break;
 

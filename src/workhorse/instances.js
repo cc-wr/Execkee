@@ -17,7 +17,7 @@ export class InstanceManager {
 
     for (const inst of instances) {
       if (inst.desiredState === DESIRED_STATE.ALIVE) {
-        if (!adapter.isProcessAlive(inst.id)) {
+        if (!adapter.isProcessAlive(inst.pid)) {
           this._launchAndMonitor(inst);
         } else {
           this._startMonitor(inst.id);
@@ -38,16 +38,14 @@ export class InstanceManager {
       visibility: VISIBILITY.HIDDEN,
     });
 
+    const launched = sessionId
+      ? adapter.launchInstance(id, sessionId, projectPath)
+      : adapter.createNewInstance(id, projectPath);
+    record.pid = launched.pid;
+    record.windowHandle = launched.windowHandle;
+
     addInstance(tracking, record);
     writeTracking(tracking);
-
-    if (sessionId) {
-      adapter.launchInstance(id, sessionId, projectPath);
-    } else {
-      const result = adapter.createNewInstance(id, projectPath);
-      record.sessionId = null;
-    }
-
     this._startMonitor(id);
     return record;
   }
@@ -66,6 +64,10 @@ export class InstanceManager {
     });
     record.watermark = { position, timestamp: new Date().toISOString() };
 
+    const launched = adapter.launchInstance(id, sessionId, projectPath);
+    record.pid = launched.pid;
+    record.windowHandle = launched.windowHandle;
+
     addInstance(tracking, record);
     writeTracking(tracking);
     this._startMonitor(id);
@@ -78,7 +80,7 @@ export class InstanceManager {
     if (!inst) return { success: false, error: 'Instance not found' };
     if (inst.heldBySubcontroller) return { success: false, error: 'Instance held for report — retry shortly' };
 
-    const shown = adapter.showWindow(instanceId);
+    const shown = adapter.showWindow(inst.windowHandle);
     if (shown) {
       updateInstance(tracking, instanceId, { visibility: VISIBILITY.FOREGROUND });
       writeTracking(tracking);
@@ -91,7 +93,7 @@ export class InstanceManager {
     const inst = tracking.instances[instanceId];
     if (!inst) return { success: false, error: 'Instance not found' };
 
-    const hidden = adapter.hideWindow(instanceId);
+    const hidden = adapter.hideWindow(inst.windowHandle);
     if (hidden) {
       updateInstance(tracking, instanceId, { visibility: VISIBILITY.HIDDEN });
       writeTracking(tracking);
@@ -140,7 +142,7 @@ export class InstanceManager {
     writeTracking(tracking);
 
     this._stopMonitor(instanceId);
-    adapter.killInstance(instanceId);
+    adapter.killInstance(inst.pid);
 
     const fresh = readTracking();
     updateInstance(fresh, instanceId, { desiredState: DESIRED_STATE.CLOSED });
@@ -167,14 +169,21 @@ export class InstanceManager {
       desiredState: inst.desiredState,
       visibility: inst.visibility,
       heldBySubcontroller: inst.heldBySubcontroller,
-      processAlive: adapter.isProcessAlive(inst.id),
+      processAlive: adapter.isProcessAlive(inst.pid),
       lastActivityTime: inst.lastActivityTime,
     }));
   }
 
   _launchAndMonitor(inst) {
     console.log(`[instances] Launching instance ${inst.id} (session: ${inst.sessionId})`);
-    adapter.launchInstance(inst.id, inst.sessionId, inst.projectPath);
+    const launched = adapter.launchInstance(inst.id, inst.sessionId, inst.projectPath);
+    const tracking = readTracking();
+    updateInstance(tracking, inst.id, {
+      pid: launched.pid,
+      windowHandle: launched.windowHandle,
+      crashCount: inst.crashCount || 0,
+    });
+    writeTracking(tracking);
     this._startMonitor(inst.id);
   }
 
@@ -189,8 +198,10 @@ export class InstanceManager {
         return;
       }
 
-      if (!adapter.isProcessAlive(instanceId)) {
-        console.log(`[instances] Instance ${instanceId} process died — crash recovery`);
+      // Single-signal liveness: claude.exe owns its own window, so a dead PID
+      // means a genuinely dead session (no zombie window to confuse us).
+      if (!adapter.isProcessAlive(inst.pid)) {
+        console.log(`[instances] Instance ${instanceId} (pid=${inst.pid}) died — crash recovery`);
         inst.crashCount = (inst.crashCount || 0) + 1;
 
         if (inst.crashCount > config.CRASH_RETRY_MAX) {
@@ -205,6 +216,9 @@ export class InstanceManager {
         updateInstance(tracking, instanceId, { crashCount: inst.crashCount });
         writeTracking(tracking);
 
+        // Stop monitoring during the relaunch so we don't double-fire while the
+        // new window is still coming up (launch polls up to ~12s for its handle).
+        this._stopMonitor(instanceId);
         const delay = config.CRASH_RETRY_BASE_MS * Math.pow(2, inst.crashCount - 1);
         setTimeout(() => {
           this._launchAndMonitor(inst);
