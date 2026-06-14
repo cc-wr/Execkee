@@ -108,6 +108,30 @@ export function writeLifeTasks(data) {
   writeJson(config.LIFE_TASKS_FILE, data);
 }
 
+// --- Issue backlog (dev feedback the primary captures for later code work) ---
+
+export function readIssues() {
+  return readJson(config.ISSUES_FILE, { issues: [] });
+}
+
+export function writeIssues(data) {
+  writeJson(config.ISSUES_FILE, data);
+}
+
+export function addIssue(text, area) {
+  const data = readIssues();
+  const id = `iss-${(data.issues.length + 1)}-${Date.now().toString(36)}`;
+  data.issues.push({
+    id,
+    text,
+    area: area || null,
+    status: 'open',
+    createdAt: new Date().toISOString(),
+  });
+  writeIssues(data);
+  return id;
+}
+
 // --- Server State ---
 
 export function readState() {

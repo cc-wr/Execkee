@@ -110,7 +110,7 @@ switch (cmd) {
   case 'manage': {
     const [sessionId, ...rest] = args;
     if (!sessionId) {
-      console.error('Usage: manage <session-id> [name] [--path <project-path>] [--baseline] [--open]');
+      console.error('Usage: manage <session-id> [name] [--path <project-path>] [--from-now] [--open]');
       process.exit(1);
     }
     let name = 'Managed Session';
@@ -120,8 +120,12 @@ switch (cmd) {
       projectPath = rest[pathIdx + 1] || projectPath;
       rest.splice(pathIdx, 2);
     }
-    // §4.6b: baseline-from-start is an explicit option, defaulting to "now".
-    let baseline = false;
+    // §A.11: adoption defaults to a full baseline report (the whole point of
+    // adopting). --from-now opts out (watermark = current end, deltas only).
+    let baseline = true;
+    const fnIdx = rest.findIndex(a => a === '--from-now');
+    if (fnIdx >= 0) { baseline = false; rest.splice(fnIdx, 1); }
+    // accept --baseline / --from-start as explicit (already the default)
     const blIdx = rest.findIndex(a => a === '--baseline' || a === '--from-start');
     if (blIdx >= 0) { baseline = true; rest.splice(blIdx, 1); }
     // §4.6b secondary: session already open in a GUI the user holds.
@@ -150,7 +154,36 @@ switch (cmd) {
     if (result.success === false) {
       console.log(`Failed: ${result.error}`);
     } else {
-      console.log(`Managed as ${instanceId}${baseline ? ' (baseline from start)' : ''}${alreadyOpen ? ' (adopted as foreground)' : ''}`);
+      console.log(`Managed as ${instanceId}${baseline ? '' : ' (from now)'}${alreadyOpen ? ' (adopted as foreground)' : ''}`);
+    }
+    break;
+  }
+
+  case 'issue': {
+    const { readIssues, addIssue, writeIssues } = await import('./common/store.js');
+    const sub = args[0];
+    if (sub === 'add') {
+      const text = args.slice(1).join(' ');
+      if (!text) { console.error('Usage: issue add <text>'); process.exit(1); }
+      const id = addIssue(text);
+      console.log(`Logged ${id}`);
+    } else if (sub === 'done' || sub === 'close') {
+      const id = args[1];
+      const data = readIssues();
+      const iss = data.issues.find(i => i.id === id);
+      if (iss) { iss.status = 'done'; iss.closedAt = new Date().toISOString(); writeIssues(data); console.log(`Closed ${id}`); }
+      else { console.log(`Not found: ${id}`); }
+    } else {
+      // list (default) — open issues, or `issue all`
+      const data = readIssues();
+      const all = sub === 'all';
+      const items = data.issues.filter(i => all || i.status === 'open');
+      if (!items.length) { console.log(all ? 'No issues.' : 'No open issues.'); }
+      else {
+        for (const i of items) {
+          console.log(`${i.status === 'open' ? '[ ]' : '[x]'} ${i.id}  ${i.text}`);
+        }
+      }
     }
     break;
   }
@@ -269,5 +302,8 @@ switch (cmd) {
     console.log('  close <instance-id>        Close an instance');
     console.log('  dashboard                  Show raw dashboard data');
     console.log('  sessions                   List available Claude sessions');
+    console.log('  issue add <text>           Log an Execkee improvement/bug to the backlog');
+    console.log('  issue [all]                List open (or all) backlog issues');
+    console.log('  issue done <id>            Mark a backlog issue resolved');
     break;
 }

@@ -471,3 +471,19 @@ Before any real cross-machine setup, run **both roles on the same machine** — 
 **A.9 Output-format convention.** `claude -p --output-format json` returns a JSON **array of event objects**; the model's answer is the `result` field of the final `type:"result"` event. Both the report fork and the cycle synthesis parse it this way.
 
 **A.10 Phase-0 validation.** The full loop was exercised end-to-end: create / hide / fork-report (working session untouched) / foreground / crash-and-auto-resume / intentional close (primary and in-instance) / a cycle that synthesizes a report + tasks into time-aware sentences / resolve via the primary with live SSE promotion. Deferred to Phase 1 (consistent with §9): cross-filesystem `.claude` sync, per-workhorse tracking mirror, real network/dead-workhorse behavior, heterogeneous-OS adapters.
+
+---
+
+## Codicil B — Usability streamlining (recorded 2026-06-14)
+
+*Refinements from operating the primary surface in practice. Amends the sections noted.*
+
+**B.1 Adoption defaults to a full baseline report (reverses §4.6b/§A.7).** Originally adoption defaulted the watermark to "now" with `--baseline` opt-in. In practice, the point of adopting a conversation is to account for all of it, so adoption now defaults to a **full baseline report** (watermark = 0); `--from-now` is the opt-out for deltas-only. The §4.6b rationale (avoid a "spurious 'everything changed' first report") doesn't apply to a newly adopted instance — that history was never accounted for, so the first report is the baseline, not spurious.
+
+**B.2 Adoption auto-runs a cycle.** `manage` triggers a cycle immediately on success (server-side, fire-and-forget), so the baseline report is produced at once rather than waiting for the 30-minute timer or a manual `POST /api/run-cycle`. If the instance is adopted-and-foregrounded, the report correctly waits until it is hidden (visibility = lock, §4.2).
+
+**B.3 The improvement backlog.** A persistent backlog (`~/.execkee/issues.json`, via `cli.js issue add|list|done`) lets the user dictate Execkee shortcomings/ideas to the primary in natural language; the primary logs them for a later developer-side code pass. This is the intended channel for the long tail of usability fixes — talk to the primary, accumulate the list, address it in code later.
+
+**B.4 The primary acts directly (amends §A.4 brief).** For Execkee operations *and* edits to the life-tasks task store (mark done, add, resolve), the primary acts immediately and confirms in one line — no propose-and-wait, no step narration, no command echoes. This is a deliberate, scoped override of the controller's global "propose before editing" rule, because that ceremony proved too heavy for a natural-language control surface. Destructive actions (close/unmanage) still confirm first.
+
+**B.5 The operator brief is system-managed and versioned.** The life-tasks `CLAUDE.md` carries a version marker (`execkee-brief vN`) and is regenerated when the version changes, so brief improvements propagate on controller restart. (The `/execkee` command file remains write-once.)

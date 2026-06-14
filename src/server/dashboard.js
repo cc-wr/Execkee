@@ -106,6 +106,12 @@ export class DashboardServer {
       const result = await this.hub.sendCommand(workhorseId, command, { instanceId, ...params });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
+      // §A.11: adopting a session auto-runs a cycle so its baseline report is
+      // produced immediately — no manual "force a cycle" step. Fire-and-forget;
+      // the report only runs if the instance is hidden (visibility = lock).
+      if (command === 'manage' && result && result.success !== false && this.onRunCycle) {
+        Promise.resolve(this.onRunCycle()).then(() => this.pushUpdate()).catch(() => {});
+      }
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: err.message }));

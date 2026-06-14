@@ -55,14 +55,24 @@ cross-machine behavior is Phase 1 — see §9 / Codicil A.10.)
 ```powershell
 node src/cli.js status                      # workhorses + instances
 node src/cli.js sessions                    # sessions you can adopt
-node src/cli.js manage <session-id> "Name"  # adopt a session (--baseline / --open)
+node src/cli.js manage <session-id> "Name"  # adopt (full baseline report by default; --from-now / --open)
 node src/cli.js create "Name" [path]        # new managed instance
 node src/cli.js foreground <instance-id>    # pull up
 node src/cli.js hide <instance-id>          # background
 node src/cli.js close <instance-id>         # close permanently
 node src/cli.js sentence                    # current dashboard sentence
 node src/cli.js resolve <issue-id> "msg"    # resolve a dashboard issue
+node src/cli.js issue add "<text>"          # log an improvement/bug to the backlog
+node src/cli.js issue                       # list open backlog items
 ```
+
+Adopting a session produces a **full baseline report by default** and **auto-runs a
+cycle** so the report appears at once (no manual refresh). Use `--from-now` to adopt
+deltas-only.
+
+**The improvement backlog.** As you use Execkee, tell the primary about rough edges
+("log this for later: …") — it records them to `~/.execkee/issues.json`. Review them
+later with `node src/cli.js issue` and address them in code.
 
 **Inside any managed instance window**, typing `hide` backgrounds it and typing
 `close` closes it (intentional close, not a crash). The window's X button is
@@ -74,11 +84,10 @@ disabled so it can never accidentally kill an instance.
 2. Add a task — tell the primary "add: file the quarterly taxes, due yesterday,
    high priority" (it writes the life-tasks store).
 3. Adopt a real session: `node src/cli.js sessions` then
-   `node src/cli.js manage <id> "Some Work" --baseline`.
-4. Force a cycle now instead of waiting 30 min:
-   `Invoke-WebRequest -Uri http://localhost:7701/api/run-cycle -Method POST -Body '{}' -ContentType 'application/json'`
-5. Watch the dashboard show a conversational sentence for the top issue.
-6. Resolve it (via the primary, or `node src/cli.js resolve <issue-id> "done">`) and
+   `node src/cli.js manage <id> "Some Work"` (baseline report + auto-cycle happen automatically).
+4. Watch the dashboard show a conversational sentence for the top issue.
+   (To force a cycle manually any time: `Invoke-WebRequest -Uri http://localhost:7701/api/run-cycle -Method POST -Body '{}' -ContentType 'application/json'`.)
+5. Resolve it (via the primary, or `node src/cli.js resolve <issue-id> "done"`) and
    watch the dashboard promote the next sentence live.
 
 ## Reset for a clean test

@@ -29,6 +29,7 @@ export default Object.freeze({
   RESOLUTIONS_FILE: join(SHARED_STORE_DIR, 'resolutions.json'),
   DASHBOARD_DATA_FILE: join(SHARED_STORE_DIR, 'dashboard-data.json'),
   LIFE_TASKS_FILE: join(LIFE_TASKS_DIR, 'tasks.json'),
+  ISSUES_FILE: join(DATA_DIR, 'issues.json'),
 
   WS_PORT: 7700,
   HTTP_PORT: 7701,
