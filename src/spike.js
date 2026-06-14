@@ -76,17 +76,30 @@ console.log(`Fork completed in ${elapsed}ms`);
 console.log('');
 
 // Step 4: Parse output
-console.log('--- Fork Output ---');
 let parsed;
+let resultText = '';
 try {
   parsed = JSON.parse(output);
-  console.log(JSON.stringify(parsed, null, 2).substring(0, 2000));
+  const events = Array.isArray(parsed) ? parsed : [parsed];
+  const resultEvent = events.findLast(e => e.type === 'result');
+  resultText = resultEvent?.result || '';
+  const initEvent = events.find(e => e.type === 'system' && e.subtype === 'init');
+
+  console.log('--- Fork Metadata ---');
+  console.log(`Forked session ID: ${initEvent?.session_id || 'unknown'}`);
+  console.log(`Model: ${initEvent?.model || 'unknown'}`);
+  console.log(`Duration: ${resultEvent?.duration_ms || '?'}ms`);
+  console.log(`Cost: $${resultEvent?.total_cost_usd?.toFixed(4) || '?'}`);
+  console.log('');
+  console.log('--- Fork Result ---');
+  console.log(resultText.substring(0, 2000) || '(empty)');
+  console.log('--- End ---');
 } catch {
-  console.log('(Raw text, not JSON)');
+  console.log('--- Raw Output ---');
   console.log(output.substring(0, 2000));
-  parsed = { result: output };
+  console.log('--- End ---');
+  resultText = output;
 }
-console.log('--- End Output ---');
 console.log('');
 
 // Step 5: Verify live session integrity
@@ -114,7 +127,7 @@ if (checkLive) {
 console.log('');
 console.log('=== Spike Results ===');
 console.log(`Fork produced output: ${output.length > 0 ? 'YES' : 'NO'}`);
-console.log(`Output parseable as JSON: ${parsed ? 'YES' : 'NO'}`);
+console.log(`Result text extracted: ${resultText.length > 0 ? 'YES' : 'NO'}`);
 console.log(`Live session untouched: ${postForkSize === preForkSize ? 'YES' : 'MAYBE NOT'}`);
 console.log(`Elapsed time: ${elapsed}ms`);
 console.log('');

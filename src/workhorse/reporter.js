@@ -64,7 +64,14 @@ export async function runForkReport(sessionId) {
     let report;
     try {
       const parsed = JSON.parse(output);
-      report = parsed.result || parsed;
+      const events = Array.isArray(parsed) ? parsed : [parsed];
+      const resultEvent = events.findLast(e => e.type === 'result');
+      const resultText = resultEvent?.result || '';
+      try {
+        report = JSON.parse(resultText);
+      } catch {
+        report = { summary: resultText.substring(0, 2000), raw: true };
+      }
     } catch {
       report = { summary: output.substring(0, 2000), raw: true };
     }
