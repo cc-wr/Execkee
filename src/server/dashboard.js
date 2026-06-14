@@ -17,6 +17,7 @@ export class DashboardServer {
     this.hub = hub;
     this.server = null;
     this.sseClients = new Set();
+    this.onRunCycle = null; // set by index.js; runs a cycle on demand
   }
 
   start() {
@@ -63,6 +64,10 @@ export class DashboardServer {
 
     if (url.pathname === '/api/resolve' && req.method === 'POST') {
       return this._handleApiResolve(req, res);
+    }
+
+    if (url.pathname === '/api/run-cycle' && req.method === 'POST') {
+      return this._handleApiRunCycle(req, res);
     }
 
     if (url.pathname === '/' || url.pathname === '/index.html') {
@@ -151,6 +156,22 @@ export class DashboardServer {
       res.end(JSON.stringify({ success: true, resolved: true, promoted: data.sentence }));
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  async _handleApiRunCycle(req, res) {
+    if (!this.onRunCycle) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'No cycle runner wired' }));
+      return;
+    }
+    try {
+      await this.onRunCycle();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: err.message }));
     }
   }

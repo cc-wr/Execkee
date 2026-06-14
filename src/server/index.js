@@ -33,6 +33,9 @@ async function runCycle() {
   }
 }
 
+// Allow an on-demand cycle (POST /api/run-cycle) in addition to the timer.
+dashboard.onRunCycle = runCycle;
+
 function startCycleTimer() {
   setTimeout(() => {
     runCycle();

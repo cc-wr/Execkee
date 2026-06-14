@@ -168,13 +168,13 @@ async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports
 
   try {
     const output = await claudeRun(['-p', '--output-format', 'json', prompt]);
+    const parsed = parseSynthesis(output);
 
-    let parsed;
-    try {
-      const json = JSON.parse(output);
-      parsed = json.result ? JSON.parse(json.result) : json;
-    } catch {
-      parsed = { summary: output.substring(0, 2000), sentences: [] };
+    // If the synthesis produced nothing usable, fall back to the deterministic
+    // task-based report so an overdue/failed item still surfaces a sentence.
+    if (!parsed || (!parsed.summary && !(parsed.sentences || []).length)) {
+      console.error('[cowork] Synthesis empty/unparseable — using fallback report');
+      return buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueTodayTasks, failedInstances });
     }
 
     return {
@@ -193,6 +193,29 @@ async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports
     console.error('[cowork] Claude synthesis failed:', err.message);
     return buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueTodayTasks, failedInstances });
   }
+}
+
+// `claude -p --output-format json` emits an array of event objects; the model's
+// answer is the `result` field of the final `type:"result"` event. Extract it,
+// then parse the answer as JSON (tolerating ```json fences / surrounding prose).
+function parseSynthesis(output) {
+  let resultText = output;
+  try {
+    const events = JSON.parse(output);
+    const arr = Array.isArray(events) ? events : [events];
+    const resultEvent = arr.findLast(e => e && e.type === 'result');
+    if (resultEvent && typeof resultEvent.result === 'string') resultText = resultEvent.result;
+  } catch {
+    // not the events array — treat output as the raw answer text
+  }
+  if (!resultText) return null;
+  let t = String(resultText).trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) t = fence[1].trim();
+  try { return JSON.parse(t); } catch {}
+  const brace = t.match(/\{[\s\S]*\}/);
+  if (brace) { try { return JSON.parse(brace[0]); } catch {} }
+  return null;
 }
 
 function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incompleteTasks, instanceReports, failedInstances, recentResolutions }) {
