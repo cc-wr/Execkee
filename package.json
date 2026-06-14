@@ -1,0 +1,16 @@
+{
+  "name": "execkee",
+  "version": "0.1.0",
+  "description": "Claude Code Life Manager — controller-and-workhorse-pool system",
+  "type": "module",
+  "scripts": {
+    "server": "node src/server/index.js",
+    "workhorse": "node src/workhorse/index.js",
+    "cowork": "node src/cowork.js",
+    "spike": "node src/spike.js",
+    "setup": "node scripts/setup-workhorse.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

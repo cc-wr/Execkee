@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Execkee</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --orange: #db6d28;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+      padding: 24px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 32px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+    }
+
+    header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    #connection-status {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    #connection-status.connected { color: var(--green); }
+    #connection-status.disconnected { color: var(--red); }
+
+    /* --- The Sentence --- */
+    #sentence-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 32px;
+      min-height: 80px;
+      display: flex;
+      align-items: center;
+    }
+
+    #sentence-box.standby {
+      border-color: var(--border);
+    }
+
+    #sentence-box.active {
+      border-color: var(--accent);
+      border-width: 2px;
+    }
+
+    #sentence-text {
+      font-size: 18px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+
+    #sentence-text.standby {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    /* --- Sections --- */
+    section {
+      margin-bottom: 28px;
+    }
+
+    section h2 {
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    /* --- Tasks --- */
+    .task-list {
+      list-style: none;
+    }
+
+    .task-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .task-item:hover {
+      background: var(--surface);
+    }
+
+    .task-check {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .task-item.complete .task-check {
+      background: var(--green);
+      border-color: var(--green);
+    }
+
+    .task-item.complete .task-text {
+      text-decoration: line-through;
+      color: var(--text-muted);
+    }
+
+    .task-status {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .task-status.overdue {
+      background: rgba(248, 81, 73, 0.15);
+      color: var(--red);
+    }
+
+    .task-status.due-today {
+      background: rgba(210, 153, 34, 0.15);
+      color: var(--yellow);
+    }
+
+    .task-status.high {
+      background: rgba(219, 109, 40, 0.15);
+      color: var(--orange);
+    }
+
+    .task-text {
+      flex: 1;
+    }
+
+    .task-due {
+      font-size: 12px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    /* --- Instances --- */
+    .instance-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      gap: 12px;
+    }
+
+    .instance-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    .instance-name {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .instance-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .instance-vis {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+
+    .instance-vis.foreground { background: var(--green); }
+    .instance-vis.hidden { background: var(--text-muted); }
+
+    /* --- Flagged Events --- */
+    .event-item {
+      background: rgba(248, 81, 73, 0.1);
+      border: 1px solid rgba(248, 81, 73, 0.3);
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    /* --- Footer --- */
+    footer {
+      margin-top: 40px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .empty-state {
+      color: var(--text-muted);
+      font-size: 13px;
+      font-style: italic;
+      padding: 8px 0;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Execkee</h1>
+    <span id="connection-status" class="disconnected">disconnected</span>
+  </header>
+
+  <div id="sentence-box" class="standby">
+    <span id="sentence-text" class="standby">Stand by.</span>
+  </div>
+
+  <section id="tasks-section">
+    <h2>Today's Tasks</h2>
+    <ul id="task-list" class="task-list">
+      <li class="empty-state">No tasks for today.</li>
+    </ul>
+  </section>
+
+  <section id="instances-section">
+    <h2>Instances</h2>
+    <div id="instance-grid" class="instance-grid">
+      <div class="empty-state">No managed instances.</div>
+    </div>
+  </section>
+
+  <section id="events-section" style="display: none;">
+    <h2>Flagged Events</h2>
+    <div id="events-list"></div>
+  </section>
+
+  <footer>
+    <span id="last-cycle">No cycle data yet</span>
+    <span id="last-update">—</span>
+  </footer>
+
+  <script>
+    let evtSource = null;
+
+    function connectSSE() {
+      const status = document.getElementById('connection-status');
+      evtSource = new EventSource('/api/events');
+
+      evtSource.onopen = () => {
+        status.textContent = 'connected';
+        status.className = 'connected';
+      };
+
+      evtSource.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          render(data);
+        } catch {}
+      };
+
+      evtSource.onerror = () => {
+        status.textContent = 'disconnected';
+        status.className = 'disconnected';
+        evtSource.close();
+        setTimeout(connectSSE, 3000);
+      };
+    }
+
+    function render(data) {
+      renderSentence(data);
+      renderTasks(data.dailyTasks || []);
+      renderInstances(data.instanceStatus || []);
+      renderEvents(data.flaggedEvents || []);
+      renderFooter(data);
+    }
+
+    function renderSentence(data) {
+      const box = document.getElementById('sentence-box');
+      const text = document.getElementById('sentence-text');
+
+      if (data.standby || !data.sentence) {
+        box.className = 'standby';
+        text.className = 'standby';
+        text.textContent = 'Stand by.';
+      } else {
+        box.className = 'active';
+        text.className = '';
+        text.textContent = data.sentence.text;
+      }
+    }
+
+    function renderTasks(tasks) {
+      const list = document.getElementById('task-list');
+      if (!tasks.length) {
+        list.innerHTML = '<li class="empty-state">No tasks for today.</li>';
+        return;
+      }
+
+      list.innerHTML = tasks.map(t => {
+        const classes = ['task-item'];
+        if (t.complete) classes.push('complete');
+
+        let statusBadge = '';
+        if (t.status === 'overdue') {
+          statusBadge = '<span class="task-status overdue">overdue</span>';
+        } else if (t.status === 'due-today') {
+          statusBadge = '<span class="task-status due-today">today</span>';
+        } else if (t.priority === 'high' && !t.complete) {
+          statusBadge = '<span class="task-status high">high</span>';
+        }
+
+        const dueText = t.due ? `<span class="task-due">${t.due}</span>` : '';
+
+        return `<li class="${classes.join(' ')}">
+          <span class="task-check"></span>
+          <span class="task-text">${esc(t.text)}</span>
+          ${statusBadge}
+          ${dueText}
+        </li>`;
+      }).join('');
+    }
+
+    function renderInstances(instances) {
+      const grid = document.getElementById('instance-grid');
+      if (!instances.length) {
+        grid.innerHTML = '<div class="empty-state">No managed instances.</div>';
+        return;
+      }
+
+      grid.innerHTML = instances.map(i => {
+        const ago = i.lastActivity ? timeAgo(new Date(i.lastActivity)) : 'unknown';
+        return `<div class="instance-card">
+          <div class="instance-name">
+            <span class="instance-vis ${i.visibility}"></span>
+            ${esc(i.name)}
+          </div>
+          <div class="instance-meta">
+            ${i.workhorse} &middot; ${i.visibility} &middot; ${ago}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function renderEvents(events) {
+      const section = document.getElementById('events-section');
+      const list = document.getElementById('events-list');
+
+      if (!events.length) {
+        section.style.display = 'none';
+        return;
+      }
+
+      section.style.display = '';
+      list.innerHTML = events.map(e =>
+        `<div class="event-item">${esc(e.name || e.instanceId)}: ${esc(e.type)} (crashes: ${e.crashCount || 0})</div>`
+      ).join('');
+    }
+
+    function renderFooter(data) {
+      document.getElementById('last-cycle').textContent = data.cycleTime
+        ? `Last cycle: ${new Date(data.cycleTime).toLocaleTimeString()}`
+        : 'No cycle data yet';
+      document.getElementById('last-update').textContent = data.updatedAt
+        ? `Updated: ${new Date(data.updatedAt).toLocaleTimeString()}`
+        : '—';
+    }
+
+    function timeAgo(date) {
+      const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+      if (seconds < 60) return 'just now';
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+      if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+      return `${Math.floor(seconds / 86400)}d ago`;
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s || '';
+      return d.innerHTML;
+    }
+
+    connectSSE();
+  </script>
+</body>
+</html>
