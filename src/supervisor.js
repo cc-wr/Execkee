@@ -93,8 +93,12 @@ function ensurePrimarySettings() {
 function launchPrimaryWindow() {
   const cwd = config.LIFE_TASKS_DIR;
   const settings = ensurePrimarySettings();
-  const seed = PRIMARY_SEED.replace(/'/g, "''");
-  const psCmd = `$p = Start-Process claude -WorkingDirectory '${cwd}' -ArgumentList @('--settings','${settings}','${seed}') -PassThru; Write-Output $p.Id`;
+  // Pass the whole arg line as ONE PowerShell string with each value
+  // double-quoted, so the multi-word seed prompt reaches claude intact
+  // (an -ArgumentList @(...) array splits space-containing elements).
+  const argLine = `--settings "${settings}" "${PRIMARY_SEED}"`;
+  const psArgLine = argLine.replace(/'/g, "''");
+  const psCmd = `$p = Start-Process claude -WorkingDirectory '${cwd}' -ArgumentList '${psArgLine}' -PassThru; Write-Output $p.Id`;
   try {
     const out = execFileSync('powershell', ['-NoProfile', '-Command', psCmd], {
       encoding: 'utf-8', windowsHide: true, timeout: 15_000,
