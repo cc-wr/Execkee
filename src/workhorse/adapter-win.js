@@ -1,7 +1,30 @@
 import { execSync } from 'child_process';
 import { writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import config from '../common/config.js';
+
+const EXECKEE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const HOOK_PATH = join(EXECKEE_ROOT, 'src', 'instance-hook.js');
+const INSTANCE_SETTINGS_FILE = join(config.DATA_DIR, 'instance-settings.json');
+
+// Session-scoped settings injected at launch via `claude --settings <file>`.
+// Carries the UserPromptSubmit hook that handles in-instance `hide`/`close`.
+// The user's global ~/.claude is never modified.
+let settingsWritten = false;
+function ensureInstanceSettings() {
+  if (settingsWritten) return INSTANCE_SETTINGS_FILE;
+  const settings = {
+    hooks: {
+      UserPromptSubmit: [
+        { hooks: [{ type: 'command', command: `node "${HOOK_PATH}"` }] },
+      ],
+    },
+  };
+  writeFileSync(INSTANCE_SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+  settingsWritten = true;
+  return INSTANCE_SETTINGS_FILE;
+}
 
 // Native Windows adapter.
 //
@@ -27,7 +50,8 @@ param(
     [int]$ProcId = 0,
     [string]$Handle = "0",
     [string]$Cwd = ".",
-    [string]$ArgString = ""
+    [string]$ArgString = "",
+    [string]$InstanceId = ""
 )
 
 Add-Type @"
@@ -38,13 +62,21 @@ public class ExeckeeWin32 {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern IntPtr GetSystemMenu(IntPtr hWnd, bool bRevert);
+    [DllImport("user32.dll")] public static extern bool DeleteMenu(IntPtr hMenu, uint uPosition, uint uFlags);
     public const int SW_HIDE = 0;
     public const int SW_RESTORE = 9;
+    public const uint SC_CLOSE = 0xF060;
+    public const uint MF_BYCOMMAND = 0x0;
 }
 "@
 
 switch ($Action) {
     "launch" {
+        if ($InstanceId -and $InstanceId.Length -gt 0) {
+            # Inherited by claude and by its hook child processes (§ in-instance control).
+            $env:EXECKEE_INSTANCE_ID = $InstanceId
+        }
         $sp = @{ FilePath = 'claude'; PassThru = $true; WorkingDirectory = $Cwd }
         if ($ArgString -and $ArgString.Trim().Length -gt 0) {
             $sp['ArgumentList'] = $ArgString.Split(' ')
@@ -61,6 +93,16 @@ switch ($Action) {
             if ($proc.MainWindowHandle -ne [IntPtr]::Zero) {
                 $h = [int64]$proc.MainWindowHandle
                 break
+            }
+        }
+        if ($h -ne 0) {
+            # X button must never kill the instance (§4.1, §4.6a permanence): remove
+            # the close item from the window's system menu so the X cannot terminate
+            # it. Backgrounding is done via typed 'hide' or the primary.
+            $hwnd = [IntPtr]$h
+            $menu = [ExeckeeWin32]::GetSystemMenu($hwnd, $false)
+            if ($menu -ne [IntPtr]::Zero) {
+                [ExeckeeWin32]::DeleteMenu($menu, [ExeckeeWin32]::SC_CLOSE, [ExeckeeWin32]::MF_BYCOMMAND) | Out-Null
             }
         }
         Write-Output "$procId $h"
@@ -130,9 +172,11 @@ function runHelper(params) {
   }
 }
 
-function doLaunch(argString, projectPath) {
+function doLaunch(instanceId, claudeArgs, projectPath) {
   const cwd = projectPath || process.cwd();
-  const out = runHelper({ Action: 'launch', Cwd: cwd, ArgString: argString });
+  const settings = ensureInstanceSettings();
+  const argString = [...claudeArgs, '--settings', settings].join(' ');
+  const out = runHelper({ Action: 'launch', Cwd: cwd, ArgString: argString, InstanceId: instanceId });
   const [pidStr, handleStr] = out.split(/\s+/);
   const pid = parseInt(pidStr, 10) || null;
   const windowHandle = handleStr && handleStr !== '0' ? handleStr : null;
@@ -140,13 +184,13 @@ function doLaunch(argString, projectPath) {
 }
 
 export function launchInstance(instanceId, sessionId, projectPath) {
-  const result = doLaunch(`--resume ${sessionId}`, projectPath);
+  const result = doLaunch(instanceId, ['--resume', sessionId], projectPath);
   console.log(`[adapter-win] Launched ${instanceId}: pid=${result.pid} hwnd=${result.windowHandle}`);
   return result;
 }
 
 export function createNewInstance(instanceId, projectPath) {
-  const result = doLaunch('', projectPath);
+  const result = doLaunch(instanceId, [], projectPath);
   console.log(`[adapter-win] Created ${instanceId}: pid=${result.pid} hwnd=${result.windowHandle}`);
   return result;
 }

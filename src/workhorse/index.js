@@ -63,10 +63,10 @@ const connection = new ServerConnection({
         return instanceManager.close(msg.instanceId);
 
       case CMD.CREATE:
-        return { success: true, instance: instanceManager.createInstance(msg) };
+        return instanceManager.createInstance(msg);
 
       case CMD.MANAGE:
-        return { success: true, instance: instanceManager.manageExisting(msg) };
+        return instanceManager.manageExisting(msg);
 
       case CMD.UNMANAGE:
         return instanceManager.unmanage(msg.instanceId);

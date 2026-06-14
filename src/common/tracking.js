@@ -39,6 +39,7 @@ export function createInstanceRecord({ id, workhorseId, name, projectPath, sessi
     pid: null,
     windowHandle: null,
     heldBySubcontroller: false,
+    externallyHeld: false,
     watermark: { position: 0, timestamp: null },
     lastReportTime: null,
     lastReportContent: null,

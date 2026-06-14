@@ -1,6 +1,6 @@
 import { readTracking, writeTracking, createInstanceRecord, addInstance, updateInstance, getInstancesForWorkhorse } from '../common/tracking.js';
 import { DESIRED_STATE, VISIBILITY } from '../common/protocol.js';
-import { hasSessionChanged, runForkReport, getSessionPosition } from './reporter.js';
+import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath } from './reporter.js';
 import * as adapter from './adapter-win.js';
 import config from '../common/config.js';
 
@@ -16,7 +16,9 @@ export class InstanceManager {
     const instances = getInstancesForWorkhorse(tracking, this.workhorseId);
 
     for (const inst of instances) {
-      if (inst.desiredState === DESIRED_STATE.ALIVE) {
+      // Externally-held instances (adopted while open in the user's own GUI)
+      // have no pid/handle we own — don't try to launch or supervise them.
+      if (inst.desiredState === DESIRED_STATE.ALIVE && !inst.externallyHeld) {
         if (!adapter.isProcessAlive(inst.pid)) {
           this._launchAndMonitor(inst);
         } else {
@@ -27,7 +29,13 @@ export class InstanceManager {
   }
 
   createInstance({ id, name, sessionId, projectPath }) {
-    const tracking = readTracking();
+    // Atomic: launch first, and only persist the record once we have a live pid.
+    const launched = sessionId
+      ? adapter.launchInstance(id, sessionId, projectPath)
+      : adapter.createNewInstance(id, projectPath);
+    if (!launched.pid) {
+      return { success: false, error: 'Launch failed — instance not created' };
+    }
 
     const record = createInstanceRecord({
       id,
@@ -37,24 +45,26 @@ export class InstanceManager {
       sessionId,
       visibility: VISIBILITY.HIDDEN,
     });
-
-    const launched = sessionId
-      ? adapter.launchInstance(id, sessionId, projectPath)
-      : adapter.createNewInstance(id, projectPath);
     record.pid = launched.pid;
     record.windowHandle = launched.windowHandle;
 
+    const tracking = readTracking();
     addInstance(tracking, record);
     writeTracking(tracking);
     this._applyVisibility(record.windowHandle, record.visibility);
     this._startMonitor(id);
-    return record;
+    return { success: true, instance: record };
   }
 
-  manageExisting({ id, name, sessionId, projectPath }) {
-    const tracking = readTracking();
+  manageExisting({ id, name, sessionId, projectPath, baseline, alreadyOpen }) {
+    // §4.6b step 1: verify the session exists on disk BEFORE adopting anything.
+    if (!getSessionJsonlPath(sessionId)) {
+      return { success: false, error: 'Session not found on disk' };
+    }
 
-    const position = getSessionPosition(sessionId);
+    // §4.6b: watermark defaults to "now" (current position) so pre-existing
+    // history isn't reported as fresh; --baseline opts into a from-start report.
+    const position = baseline ? 0 : getSessionPosition(sessionId);
     const record = createInstanceRecord({
       id,
       workhorseId: this.workhorseId,
@@ -65,15 +75,36 @@ export class InstanceManager {
     });
     record.watermark = { position, timestamp: new Date().toISOString() };
 
+    // §4.6b secondary: the session is already open in a GUI the user holds.
+    // Adopt the record as foreground (so it's never reported on until hidden)
+    // and do NOT launch a duplicate window or supervise it. Locating/attaching
+    // the user's pre-existing window is deferred to Phase 1.
+    if (alreadyOpen) {
+      record.visibility = VISIBILITY.FOREGROUND;
+      record.pid = null;
+      record.windowHandle = null;
+      record.externallyHeld = true;
+      const tracking = readTracking();
+      addInstance(tracking, record);
+      writeTracking(tracking);
+      return { success: true, instance: record };
+    }
+
+    // Common case (not currently open): resume it, verify the launch, and only
+    // THEN persist — adoption is atomic, no partial/orphan record on failure.
     const launched = adapter.launchInstance(id, sessionId, projectPath);
+    if (!launched.pid) {
+      return { success: false, error: 'Launch failed — session not adopted' };
+    }
     record.pid = launched.pid;
     record.windowHandle = launched.windowHandle;
 
+    const tracking = readTracking();
     addInstance(tracking, record);
     writeTracking(tracking);
     this._applyVisibility(record.windowHandle, record.visibility);
     this._startMonitor(id);
-    return record;
+    return { success: true, instance: record };
   }
 
   foreground(instanceId) {
@@ -210,7 +241,26 @@ export class InstanceManager {
     const interval = setInterval(() => {
       const tracking = readTracking();
       const inst = tracking.instances[instanceId];
-      if (!inst || inst.desiredState !== DESIRED_STATE.ALIVE) {
+      if (!inst) {
+        this._stopMonitor(instanceId);
+        return;
+      }
+
+      // In-instance close (§4.6a): the hook set desiredState=closing locally
+      // before exit. Finalize it here — kill the window if still up, mark
+      // closed, and stop. A bare exit is never a close; only this transition is.
+      if (inst.desiredState === DESIRED_STATE.CLOSING) {
+        if (adapter.isProcessAlive(inst.pid)) {
+          adapter.killInstance(inst.pid);
+        }
+        updateInstance(tracking, instanceId, { desiredState: DESIRED_STATE.CLOSED });
+        writeTracking(tracking);
+        this._stopMonitor(instanceId);
+        this.onEvent({ type: 'closed', instanceId });
+        return;
+      }
+
+      if (inst.desiredState !== DESIRED_STATE.ALIVE) {
         this._stopMonitor(instanceId);
         return;
       }

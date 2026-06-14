@@ -2,7 +2,11 @@ import { createServer } from 'http';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { readDashboardData } from '../common/store.js';
+import {
+  readDashboardData, writeDashboardData,
+  readSentenceQueue, writeSentenceQueue,
+  logResolution,
+} from '../common/store.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_HTML_PATH = join(__dirname, '..', '..', 'dashboard', 'index.html');
@@ -112,11 +116,39 @@ export class DashboardServer {
   async _handleApiResolve(req, res) {
     const body = await this._readBody(req);
     try {
-      const { issueId, message } = JSON.parse(body);
-      const { logResolution } = await import('../common/store.js');
+      const { issueId, message, resolved } = JSON.parse(body);
+
+      // Resolution-only rule (§4.10): the primary owns the resolved-vs-discussion
+      // judgment. Mutate the dashboard ONLY when it asserts resolved === true.
+      // Anything else (discussion, "unsure") leaves the sentence untouched.
+      if (resolved !== true) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, resolved: false }));
+        return;
+      }
+
       logResolution(issueId, message);
+
+      // Promote the next pre-staged secondary sentence, or fall to "Stand by."
+      const queue = readSentenceQueue();
+      const data = readDashboardData();
+      if (data.sentence && data.sentence.id === issueId) {
+        const next = (queue.secondaries || []).shift() || null;
+        writeSentenceQueue({ major: next, secondaries: queue.secondaries || [] });
+        if (next) {
+          data.sentence = { id: next.id, text: next.text, priority: 1 };
+          data.standby = false;
+        } else {
+          data.sentence = null;
+          data.standby = true;
+        }
+        data.updatedBy = 'primary';
+        writeDashboardData(data);
+        this.pushUpdate();
+      }
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
+      res.end(JSON.stringify({ success: true, resolved: true, promoted: data.sentence }));
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: err.message }));

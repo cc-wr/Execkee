@@ -96,15 +96,21 @@ switch (cmd) {
       console.error('Usage: resolve <issue-id> <message>');
       process.exit(1);
     }
-    const result = await api('/api/resolve', 'POST', { issueId, message });
-    console.log(result.success ? 'Resolved.' : `Failed: ${result.error}`);
+    // Invoking resolve IS the primary's judgment that the issue is resolved
+    // (§4.10). Mere discussion never calls this command.
+    const result = await api('/api/resolve', 'POST', { issueId, message, resolved: true });
+    if (result.success && result.resolved) {
+      console.log(result.promoted ? `Resolved. Now showing: ${result.promoted.text}` : 'Resolved. Stand by.');
+    } else {
+      console.log(`Failed: ${result.error}`);
+    }
     break;
   }
 
   case 'manage': {
     const [sessionId, ...rest] = args;
     if (!sessionId) {
-      console.error('Usage: manage <session-id> [name] [--path <project-path>]');
+      console.error('Usage: manage <session-id> [name] [--path <project-path>] [--baseline] [--open]');
       process.exit(1);
     }
     let name = 'Managed Session';
@@ -114,6 +120,14 @@ switch (cmd) {
       projectPath = rest[pathIdx + 1] || projectPath;
       rest.splice(pathIdx, 2);
     }
+    // §4.6b: baseline-from-start is an explicit option, defaulting to "now".
+    let baseline = false;
+    const blIdx = rest.findIndex(a => a === '--baseline' || a === '--from-start');
+    if (blIdx >= 0) { baseline = true; rest.splice(blIdx, 1); }
+    // §4.6b secondary: session already open in a GUI the user holds.
+    let alreadyOpen = false;
+    const openIdx = rest.indexOf('--open');
+    if (openIdx >= 0) { alreadyOpen = true; rest.splice(openIdx, 1); }
     if (rest.length > 0) name = rest.join(' ');
     const state = await api('/api/state');
     const wh = state.workhorses?.[0];
@@ -130,8 +144,14 @@ switch (cmd) {
       name,
       sessionId,
       projectPath,
+      baseline,
+      alreadyOpen,
     });
-    console.log(result.success !== false ? `Managed as ${instanceId}` : `Failed: ${result.error}`);
+    if (result.success === false) {
+      console.log(`Failed: ${result.error}`);
+    } else {
+      console.log(`Managed as ${instanceId}${baseline ? ' (baseline from start)' : ''}${alreadyOpen ? ' (adopted as foreground)' : ''}`);
+    }
     break;
   }
 
