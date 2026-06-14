@@ -12,7 +12,7 @@
 //   node src/supervisor.js controller
 //   node src/supervisor.js workhorse ws://<host>:7700 <workhorseId> <name>
 
-import { spawn, execSync } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import { hostname } from 'os';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -21,6 +21,8 @@ import config from './common/config.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'src', 'cli.js');
+const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
+const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
 
 const mode = process.argv[2] || 'controller';
 const serverUrl = process.argv[3] || `ws://localhost:${config.WS_PORT}`;
@@ -69,11 +71,32 @@ function superviseNode(name, args) {
 
 // --- The primary Claude Code surface (a visible window in life-tasks) ---
 
+// Pre-grant the primary file access to the relevant dirs + the node CLI, and
+// auto-accept edits, so the user is never prompted to approve. (Bash beyond
+// node still prompts — deliberate.) Created once; never clobbers user edits.
+let primarySettingsWritten = false;
+function ensurePrimarySettings() {
+  if (!primarySettingsWritten && !existsSync(PRIMARY_SETTINGS)) {
+    const settings = {
+      permissions: {
+        defaultMode: 'acceptEdits',
+        allow: ['Bash(node:*)'],
+        additionalDirectories: [config.DATA_DIR, ROOT],
+      },
+    };
+    writeFileSync(PRIMARY_SETTINGS, JSON.stringify(settings, null, 2), 'utf-8');
+  }
+  primarySettingsWritten = true;
+  return PRIMARY_SETTINGS;
+}
+
 function launchPrimaryWindow() {
   const cwd = config.LIFE_TASKS_DIR;
-  const ps = `$p = Start-Process claude -WorkingDirectory '${cwd}' -PassThru; Write-Output $p.Id`;
+  const settings = ensurePrimarySettings();
+  const seed = PRIMARY_SEED.replace(/'/g, "''");
+  const psCmd = `$p = Start-Process claude -WorkingDirectory '${cwd}' -ArgumentList @('--settings','${settings}','${seed}') -PassThru; Write-Output $p.Id`;
   try {
-    const out = execSync(`powershell -NoProfile -Command "${ps}"`, {
+    const out = execFileSync('powershell', ['-NoProfile', '-Command', psCmd], {
       encoding: 'utf-8', windowsHide: true, timeout: 15_000,
     }).trim();
     return parseInt(out, 10) || null;
@@ -109,7 +132,7 @@ function startPrimary() {
 
 function openDashboard() {
   try {
-    execSync(`powershell -NoProfile -Command "Start-Process 'http://localhost:${config.HTTP_PORT}'"`, {
+    execFileSync('powershell', ['-NoProfile', '-Command', `Start-Process 'http://localhost:${config.HTTP_PORT}'`], {
       windowsHide: true, timeout: 10_000,
     });
   } catch { /* non-fatal */ }
@@ -145,6 +168,21 @@ orchestrates permanent Claude Code instances across a pool of workhorse machines
 runs a 30-minute life-tracking cycle, and surfaces the single most pressing issue
 on an HTML dashboard. The user talks to **you** in natural language; you translate
 their intent into Execkee commands and keep their task list current.
+
+## How you talk to the user (important)
+
+The Execkee CLI below is an **implementation detail the user does not care about.**
+Never show raw \`node ...\` commands to the user, never make them copy or run a
+command, and never ask them to approve a command's wording. Just do what they
+asked and report the result in plain, conversational language.
+
+- **Act directly** on routine, reversible requests - show status, pull an
+  instance up, hide one, read the dashboard sentence, update the task list.
+  Do them and report the outcome; do not ask for a separate go-ahead.
+- **Confirm first** only before destructive or irreversible actions: closing an
+  instance, unmanaging one, or anything that could lose a conversation.
+- For Execkee operations this takes precedence over any general
+  "propose-and-wait" habit - the user wants a smooth natural-language surface.
 
 ## How you act on the system
 
@@ -242,7 +280,7 @@ function shutdown() {
   }
   if (primaryPid) {
     try {
-      execSync(`taskkill /PID ${primaryPid} /T /F`, { windowsHide: true, timeout: 5000 });
+      execFileSync('taskkill', ['/PID', String(primaryPid), '/T', '/F'], { windowsHide: true, timeout: 5000 });
     } catch (err) {
       log('main', `taskkill of primary ${primaryPid} failed: ${err.message}`);
     }

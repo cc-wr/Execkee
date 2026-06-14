@@ -1,4 +1,4 @@
-import { statSync, existsSync, readdirSync } from 'fs';
+import { statSync, existsSync, readdirSync, openSync, readSync, closeSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { claudeRun } from '../common/exec-async.js';
@@ -35,6 +35,29 @@ export function getSessionJsonlPath(sessionId) {
   return null;
 }
 
+// `claude --resume <id>` is scoped to the project derived from the cwd, so a
+// managed session MUST be launched/forked from its original working directory.
+// That directory is recorded in the session transcript's `cwd` field; read it
+// from the first events (bounded prefix, transcripts can be large).
+export function getSessionCwd(sessionId) {
+  const path = getSessionJsonlPath(sessionId);
+  if (!path) return null;
+  try {
+    const fd = openSync(path, 'r');
+    const buf = Buffer.alloc(65536);
+    const bytes = readSync(fd, buf, 0, 65536, 0);
+    closeSync(fd);
+    for (const line of buf.toString('utf-8', 0, bytes).split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const o = JSON.parse(line);
+        if (o && typeof o.cwd === 'string' && o.cwd) return o.cwd;
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+
 export function getSessionPosition(sessionId) {
   const path = getSessionJsonlPath(sessionId);
   if (!path) return 0;
@@ -50,8 +73,12 @@ export function hasSessionChanged(sessionId, watermark) {
   return currentPosition > (watermark?.position || 0);
 }
 
-export async function runForkReport(sessionId) {
+export async function runForkReport(sessionId, cwd) {
   try {
+    const options = {};
+    // Resume is project-scoped: fork from the session's own working directory.
+    const dir = cwd || getSessionCwd(sessionId);
+    if (dir && existsSync(dir)) options.cwd = dir;
     const output = await claudeRun([
       '-p',
       '--resume', sessionId,
@@ -59,7 +86,7 @@ export async function runForkReport(sessionId) {
       '--no-session-persistence',
       '--output-format', 'json',
       REPORT_PROMPT,
-    ]);
+    ], options);
 
     let report;
     try {
@@ -67,8 +94,11 @@ export async function runForkReport(sessionId) {
       const events = Array.isArray(parsed) ? parsed : [parsed];
       const resultEvent = events.findLast(e => e.type === 'result');
       const resultText = resultEvent?.result || '';
+      let jsonText = resultText.trim();
+      const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      if (fence) jsonText = fence[1].trim();
       try {
-        report = JSON.parse(resultText);
+        report = JSON.parse(jsonText);
       } catch {
         report = { summary: resultText.substring(0, 2000), raw: true };
       }

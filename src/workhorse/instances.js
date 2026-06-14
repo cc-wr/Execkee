@@ -1,6 +1,6 @@
 import { readTracking, writeTracking, createInstanceRecord, addInstance, updateInstance, getInstancesForWorkhorse } from '../common/tracking.js';
 import { DESIRED_STATE, VISIBILITY } from '../common/protocol.js';
-import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath } from './reporter.js';
+import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd } from './reporter.js';
 import * as adapter from './adapter-win.js';
 import config from '../common/config.js';
 
@@ -62,6 +62,11 @@ export class InstanceManager {
       return { success: false, error: 'Session not found on disk' };
     }
 
+    // `claude --resume` is project-scoped: the instance MUST run from the
+    // session's own working directory, not wherever the manage command was
+    // issued. Derive it from the transcript; fall back to the supplied path.
+    const effectivePath = getSessionCwd(sessionId) || projectPath;
+
     // §4.6b: watermark defaults to "now" (current position) so pre-existing
     // history isn't reported as fresh; --baseline opts into a from-start report.
     const position = baseline ? 0 : getSessionPosition(sessionId);
@@ -69,7 +74,7 @@ export class InstanceManager {
       id,
       workhorseId: this.workhorseId,
       name,
-      projectPath,
+      projectPath: effectivePath,
       sessionId,
       visibility: VISIBILITY.HIDDEN,
     });
@@ -92,7 +97,7 @@ export class InstanceManager {
 
     // Common case (not currently open): resume it, verify the launch, and only
     // THEN persist — adoption is atomic, no partial/orphan record on failure.
-    const launched = adapter.launchInstance(id, sessionId, projectPath);
+    const launched = adapter.launchInstance(id, sessionId, effectivePath);
     if (!launched.pid) {
       return { success: false, error: 'Launch failed — session not adopted' };
     }
@@ -113,12 +118,16 @@ export class InstanceManager {
     if (!inst) return { success: false, error: 'Instance not found' };
     if (inst.heldBySubcontroller) return { success: false, error: 'Instance held for report — retry shortly' };
 
+    if (inst.externallyHeld || !inst.windowHandle) {
+      return { success: false, error: 'No managed window to foreground (externally held or not launched)' };
+    }
     const shown = adapter.showWindow(inst.windowHandle);
     if (shown) {
       updateInstance(tracking, instanceId, { visibility: VISIBILITY.FOREGROUND });
       writeTracking(tracking);
+      return { success: true };
     }
-    return { success: shown };
+    return { success: false, error: 'Window could not be shown (it may have exited)' };
   }
 
   hide(instanceId) {
@@ -148,7 +157,7 @@ export class InstanceManager {
     updateInstance(tracking, instanceId, { heldBySubcontroller: true });
     writeTracking(tracking);
 
-    const result = await runForkReport(inst.sessionId);
+    const result = await runForkReport(inst.sessionId, inst.projectPath);
 
     const fresh = readTracking();
     if (result.success) {

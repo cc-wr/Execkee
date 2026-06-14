@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -161,7 +161,9 @@ function runHelper(params) {
     argv.push(`-${k}`, `${v}`);
   }
   try {
-    return execSync(`powershell ${argv.map(a => `"${a}"`).join(' ')}`, {
+    // execFileSync runs powershell.exe directly (no cmd.exe shell) with the
+    // window hidden, so these calls never flash a console.
+    return execFileSync('powershell', argv, {
       encoding: 'utf-8',
       timeout: 30_000,
       windowsHide: true,
@@ -197,7 +199,9 @@ export function createNewInstance(instanceId, projectPath) {
 
 export function isProcessAlive(pid) {
   if (!pid) return false;
-  return runHelper({ Action: 'alive', ProcId: pid }) === 'true';
+  // Native, window-less liveness check — runs every cycle, so it must not
+  // spawn a PowerShell/console each time (that was the flashing-windows bug).
+  try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
 export function hideWindow(windowHandle) {
