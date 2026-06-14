@@ -1,12 +1,25 @@
 import { platform, hostname } from 'os';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
 import config from '../common/config.js';
 import { CMD } from '../common/protocol.js';
 import { ServerConnection } from './connection.js';
 import { InstanceManager } from './instances.js';
 
-const serverUrl = process.argv[2] || `ws://localhost:${config.WS_PORT}`;
-const workhorseId = process.argv[3] || `wh-${hostname().toLowerCase()}`;
-const workhorseName = process.argv[4] || hostname();
+function loadConfig() {
+  const configPath = join(config.DATA_DIR, 'workhorse-config.json');
+  if (existsSync(configPath)) {
+    try {
+      return JSON.parse(readFileSync(configPath, 'utf-8'));
+    } catch {}
+  }
+  return {};
+}
+
+const saved = loadConfig();
+const serverUrl = process.argv[2] || saved.serverUrl || `ws://localhost:${config.WS_PORT}`;
+const workhorseId = process.argv[3] || saved.workhorseId || `wh-${hostname().toLowerCase()}`;
+const workhorseName = process.argv[4] || saved.name || hostname();
 
 console.log(`[workhorse] Starting subcontroller: ${workhorseId}`);
 console.log(`[workhorse] Server: ${serverUrl}`);

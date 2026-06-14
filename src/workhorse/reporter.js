@@ -1,7 +1,7 @@
 import { statSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { execAsync } from '../common/exec-async.js';
+import { claudeRun } from '../common/exec-async.js';
 
 const REPORT_PROMPT = [
   'You are producing a status report for this Claude Code conversation.',
@@ -51,11 +51,15 @@ export function hasSessionChanged(sessionId, watermark) {
 }
 
 export async function runForkReport(sessionId) {
-  const promptEscaped = REPORT_PROMPT.replace(/"/g, '\\"');
-  const cmd = `claude -p --resume ${sessionId} --fork-session --no-session-persistence --output-format json "${promptEscaped}"`;
-
   try {
-    const output = await execAsync(cmd);
+    const output = await claudeRun([
+      '-p',
+      '--resume', sessionId,
+      '--fork-session',
+      '--no-session-persistence',
+      '--output-format', 'json',
+      REPORT_PROMPT,
+    ]);
 
     let report;
     try {

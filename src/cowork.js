@@ -1,4 +1,4 @@
-import { execAsync } from './common/exec-async.js';
+import { claudeRun } from './common/exec-async.js';
 import { readTracking, writeTracking, updateInstance } from './common/tracking.js';
 import {
   readDashboardData, writeDashboardData,
@@ -167,8 +167,7 @@ async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports
   });
 
   try {
-    const output = await execAsync(`claude -p --output-format json "${prompt.replace(/"/g, '\\"')}"`);
-
+    const output = await claudeRun(['-p', '--output-format', 'json', prompt]);
 
     let parsed;
     try {
