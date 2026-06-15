@@ -278,6 +278,17 @@ switch (cmd) {
     break;
   }
 
+  case 'unmanage': {
+    const [instanceId] = args;
+    if (!instanceId) { console.error('Usage: unmanage <instance-id>'); process.exit(1); }
+    const state = await api('/api/state');
+    const inst = state.instances?.find(i => i.id === instanceId);
+    if (!inst) { console.error('Instance not found'); process.exit(1); }
+    const result = await api('/api/dispatch', 'POST', { workhorseId: inst.workhorseId, command: 'unmanage', instanceId });
+    console.log(result.success !== false ? 'Released (un-adopted; the Claude window is left running).' : `Failed: ${result.error}`);
+    break;
+  }
+
   case 'dashboard': {
     const data = await api('/api/dashboard-data');
     console.log(JSON.stringify(data, null, 2));
@@ -318,7 +329,8 @@ switch (cmd) {
     console.log('  create <name> [path] [--on <wh>]        Create a new managed instance');
     console.log('  foreground <instance-id>   Bring an instance to front');
     console.log('  hide <instance-id>         Hide an instance');
-    console.log('  close <instance-id>        Close an instance');
+    console.log('  close <instance-id>        Close an instance (shuts the window; session stays re-adoptable)');
+    console.log('  unmanage <instance-id>     Release / un-adopt an instance (leaves its window running)');
     console.log('  dashboard                  Show raw dashboard data');
     console.log('  sessions [--all]           Adoptable sessions per workhorse (--all incl. managed)');
     console.log('  issue add <text>           Log an Execkee improvement/bug to the backlog');

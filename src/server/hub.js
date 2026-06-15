@@ -133,6 +133,18 @@ export class Hub {
     };
   }
 
+  // Remove an instance from the master tracking (un-adopt: the workhorse drops it
+  // locally and stops monitoring; this clears it from status/dashboard).
+  forgetInstance(instanceId) {
+    const tracking = readTracking();
+    if (tracking.instances[instanceId]) {
+      delete tracking.instances[instanceId];
+      writeTracking(tracking);
+      return true;
+    }
+    return false;
+  }
+
   // Push a workhorse its authoritative roster (its own instances) from the
   // master tracking, so it can resume/launch them without reading our disk.
   _sendSync(workhorseId) {

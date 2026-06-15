@@ -24,7 +24,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 4;
+const BRIEF_VERSION = 5;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -215,8 +215,9 @@ do not show raw \`node …\` commands. The CLI is an implementation detail.
 - **Act directly** on: status, pull up / hide / adopt instances, resolve a
   dashboard issue, and **edits to the task store** (mark a task done, add one,
   change due/priority). Do the action, give a brief confirmation.
-- **Confirm first** only for the genuinely destructive: closing or unmanaging an
-  instance, or anything that could lose a conversation.
+- **Confirm first** only for the genuinely destructive: **closing** an instance (it
+  shuts a live window) or anything that could lose a conversation. Releasing /
+  un-adopting is safe — it leaves the window running.
 - This **overrides** any global "propose before editing / wait for go" habit —
   scoped to Execkee operations and the life-tasks task store. Keep replies short.
 
@@ -241,6 +242,18 @@ is read on the first cycle) and **auto-runs a cycle** so the report appears at o
 Just adopt — don't ask about baseline. Use \`--from-now\` only if the user explicitly
 wants deltas-only.
 
+## Releasing vs closing an instance
+
+Two different "stop" actions — choose by what the user means:
+- **Release / un-adopt** ("release X", "stop managing X", "un-adopt X", "let it go"):
+  \`unmanage <id>\` — Execkee stops managing/monitoring it but **leaves the Claude
+  window running**. The session stays on disk and can be re-adopted later.
+- **Close** ("close X", "shut it down"): \`close <id>\` — **shuts the window** and ends
+  the managed instance. Reassure the user the conversation isn't lost: the underlying
+  session is **preserved on disk and can be re-adopted (resumed) later** via \`manage\`.
+  (An instance you *created* fresh, with no captured session, can't be resumed once
+  closed.) Confirm before closing, since it shuts a live window.
+
 ## Commands (internal — never shown to the user)
 
 \`node "${CLI}" <command>\`:
@@ -249,7 +262,8 @@ wants deltas-only.
 - \`sentence\` / \`dashboard\` — current dashboard sentence / raw data
 - \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default.
 - \`create "<name>" [path] [--on <workhorse-id>]\` — new managed instance (on a chosen machine)
-- \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close
+- \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close (shuts the window; the session stays re-adoptable)
+- \`unmanage <id>\` — release / un-adopt (stop managing; leaves the window running)
 - \`resolve <issue-id> <message>\` — mark a dashboard issue resolved (space-delimited, no quotes)
 - \`issue add <text>\` — log a backlog item
 

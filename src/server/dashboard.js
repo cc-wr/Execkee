@@ -127,6 +127,12 @@ export class DashboardServer {
       if (command === 'manage' && result && result.success !== false && this.onRunCycle) {
         Promise.resolve(this.onRunCycle()).then(() => this.pushUpdate()).catch(() => {});
       }
+      // Un-adopt: the workhorse has dropped+stopped the instance; also remove it
+      // from master tracking so it disappears from status/dashboard.
+      if (command === 'unmanage' && result && result.success !== false) {
+        this.hub.forgetInstance(instanceId);
+        this.pushUpdate();
+      }
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: err.message }));
