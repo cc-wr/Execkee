@@ -2,6 +2,7 @@ export const MSG = Object.freeze({
   REGISTER: 'register',
   STATE_UPDATE: 'state-update',
   REPORT_RESULT: 'report-result',
+  SESSIONS_RESULT: 'sessions-result', // workhorse → controller: its adoptable sessions
   EVENT: 'event',
   COMMAND: 'command',
   SETTINGS_PUSH: 'settings-push',
@@ -20,6 +21,7 @@ export const CMD = Object.freeze({
   CREATE: 'create',
   MANAGE: 'manage',
   UNMANAGE: 'unmanage',
+  LIST_SESSIONS: 'list-sessions', // enumerate the workhorse's adoptable Claude sessions
 });
 
 export const DESIRED_STATE = Object.freeze({

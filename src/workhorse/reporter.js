@@ -36,6 +36,34 @@ export function getSessionJsonlPath(sessionId) {
   return null;
 }
 
+// Enumerate the Claude sessions on THIS machine that are adoptable (one per
+// transcript under ~/.claude/projects). Returns newest-first; the controller
+// aggregates these across workhorses and tags which are already managed.
+export function listLocalSessions() {
+  const projectsDir = join(homedir(), '.claude', 'projects');
+  if (!existsSync(projectsDir)) return [];
+  const out = [];
+  try {
+    for (const slug of readdirSync(projectsDir)) {
+      const slugDir = join(projectsDir, slug);
+      let entries;
+      try {
+        if (!statSync(slugDir).isDirectory()) continue;
+        entries = readdirSync(slugDir);
+      } catch { continue; }
+      for (const f of entries) {
+        if (!f.endsWith('.jsonl')) continue;
+        const sessionId = f.slice(0, -6);
+        let sizeBytes = 0, mtime = null;
+        try { const st = statSync(join(slugDir, f)); sizeBytes = st.size; mtime = st.mtime.toISOString(); } catch {}
+        out.push({ slug, sessionId, sizeBytes, mtime });
+      }
+    }
+  } catch {}
+  out.sort((a, b) => String(b.mtime || '').localeCompare(String(a.mtime || '')));
+  return out;
+}
+
 // `claude --resume <id>` is scoped to the project derived from the cwd, so a
 // managed session MUST be launched/forked from its original working directory.
 // That directory is recorded in the session transcript's `cwd` field; read it

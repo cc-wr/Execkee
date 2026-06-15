@@ -110,7 +110,7 @@ switch (cmd) {
   case 'manage': {
     const [sessionId, ...rest] = args;
     if (!sessionId) {
-      console.error('Usage: manage <session-id> [name] [--path <project-path>] [--from-now] [--open]');
+      console.error('Usage: manage <session-id> [name] [--on <workhorse-id>] [--path <project-path>] [--from-now] [--open]');
       process.exit(1);
     }
     let name = 'Managed Session';
@@ -132,16 +132,31 @@ switch (cmd) {
     let alreadyOpen = false;
     const openIdx = rest.indexOf('--open');
     if (openIdx >= 0) { alreadyOpen = true; rest.splice(openIdx, 1); }
+    // --on <workhorse-id>: force which workhorse adopts (else auto-route below).
+    let onWorkhorse = null;
+    const onIdx = rest.indexOf('--on');
+    if (onIdx >= 0) { onWorkhorse = rest[onIdx + 1] || null; rest.splice(onIdx, 2); }
     if (rest.length > 0) name = rest.join(' ');
-    const state = await api('/api/state');
-    const wh = state.workhorses?.[0];
-    if (!wh) {
-      console.error('No workhorse connected. Start the subcontroller first.');
+    // Route to the workhorse that actually owns this session: --on wins; else
+    // find which host's session list contains it; else fall back to the first.
+    let targetWorkhorse = onWorkhorse;
+    if (!targetWorkhorse) {
+      const sdata = await api('/api/sessions');
+      for (const g of (sdata.workhorses || [])) {
+        if ((g.sessions || []).some(s => s.sessionId === sessionId)) { targetWorkhorse = g.workhorseId; break; }
+      }
+    }
+    if (!targetWorkhorse) {
+      const state = await api('/api/state');
+      targetWorkhorse = state.workhorses?.[0]?.id;
+    }
+    if (!targetWorkhorse) {
+      console.error('No workhorse connected. Start a workhorse first.');
       process.exit(1);
     }
     const instanceId = `inst-${Date.now().toString(36)}`;
     const result = await api('/api/dispatch', 'POST', {
-      workhorseId: wh.id,
+      workhorseId: targetWorkhorse,
       command: 'manage',
       instanceId,
       id: instanceId,
@@ -189,27 +204,32 @@ switch (cmd) {
   }
 
   case 'create': {
-    const [name, projectPath] = args;
+    const rest = [...args];
+    // --on <workhorse-id>: which machine the new instance runs on (else first).
+    let onWorkhorse = null;
+    const onIdx = rest.indexOf('--on');
+    if (onIdx >= 0) { onWorkhorse = rest[onIdx + 1] || null; rest.splice(onIdx, 2); }
+    const [name, projectPath] = rest;
     if (!name) {
-      console.error('Usage: create <name> [project-path]');
+      console.error('Usage: create <name> [project-path] [--on <workhorse-id>]');
       process.exit(1);
     }
     const state = await api('/api/state');
-    const wh = state.workhorses?.[0];
-    if (!wh) {
-      console.error('No workhorse connected. Start the subcontroller first.');
+    const targetWorkhorse = onWorkhorse || state.workhorses?.[0]?.id;
+    if (!targetWorkhorse) {
+      console.error('No workhorse connected. Start a workhorse first.');
       process.exit(1);
     }
     const instanceId = `inst-${Date.now().toString(36)}`;
     const result = await api('/api/dispatch', 'POST', {
-      workhorseId: wh.id,
+      workhorseId: targetWorkhorse,
       command: 'create',
       instanceId,
       id: instanceId,
       name,
       projectPath: projectPath || null,
     });
-    console.log(result.success !== false ? `Created ${instanceId}` : `Failed: ${result.error}`);
+    console.log(result.success !== false ? `Created ${instanceId} on ${targetWorkhorse}` : `Failed: ${result.error}`);
     break;
   }
 
@@ -265,23 +285,22 @@ switch (cmd) {
   }
 
   case 'sessions': {
-    const projectsDir = join(homedir(), '.claude', 'projects');
-    if (!existsSync(projectsDir)) {
-      console.log('No Claude projects directory found.');
-      break;
-    }
-    for (const slug of readdirSync(projectsDir)) {
-      const slugDir = join(projectsDir, slug);
-      if (!statSync(slugDir).isDirectory()) continue;
-      const jsonls = readdirSync(slugDir).filter(f => f.endsWith('.jsonl'));
-      if (jsonls.length === 0) continue;
-      console.log(`${slug}/`);
-      for (const f of jsonls) {
-        const sessionId = f.replace('.jsonl', '');
-        const stat = statSync(join(slugDir, f));
-        const size = (stat.size / 1024).toFixed(1);
-        const mod = stat.mtime.toISOString().split('T')[0];
-        console.log(`  ${sessionId}  (${size}KB, ${mod})`);
+    // Adoptable sessions live on EACH workhorse (its own ~/.claude/projects);
+    // the controller aggregates them and tags which are already managed.
+    const data = await api('/api/sessions');
+    const groups = data.workhorses || [];
+    if (groups.length === 0) { console.log('No workhorses connected.'); break; }
+    const showAll = args.includes('--all');
+    for (const g of groups) {
+      console.log(`${g.workhorseName} (${g.workhorseId}):`);
+      if (g.error) { console.log(`  (could not list: ${g.error})`); continue; }
+      const list = showAll ? (g.sessions || []) : (g.sessions || []).filter(s => !s.managed);
+      if (list.length === 0) { console.log(showAll ? '  (no sessions)' : '  (no unmanaged sessions)'); continue; }
+      for (const s of list) {
+        const size = (s.sizeBytes / 1024).toFixed(1);
+        const mod = s.mtime ? s.mtime.split('T')[0] : '?';
+        const tag = s.managed ? ' [managed]' : '';
+        console.log(`  ${s.sessionId}  [${s.slug}]  (${size}KB, ${mod})${tag}`);
       }
     }
     break;
@@ -295,13 +314,13 @@ switch (cmd) {
     console.log('  instances                  Detailed instance list');
     console.log('  sentence                   Show current dashboard sentence');
     console.log('  resolve <id> <msg>         Resolve a dashboard issue');
-    console.log('  manage <session-id> <name> Adopt an existing Claude session');
-    console.log('  create <name> [path]       Create a new managed instance');
+    console.log('  manage <session-id> [name] [--on <wh>]  Adopt a session (auto-routes to its workhorse)');
+    console.log('  create <name> [path] [--on <wh>]        Create a new managed instance');
     console.log('  foreground <instance-id>   Bring an instance to front');
     console.log('  hide <instance-id>         Hide an instance');
     console.log('  close <instance-id>        Close an instance');
     console.log('  dashboard                  Show raw dashboard data');
-    console.log('  sessions                   List available Claude sessions');
+    console.log('  sessions [--all]           Adoptable sessions per workhorse (--all incl. managed)');
     console.log('  issue add <text>           Log an Execkee improvement/bug to the backlog');
     console.log('  issue [all]                List open (or all) backlog issues');
     console.log('  issue done <id>            Mark a backlog issue resolved');

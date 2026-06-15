@@ -52,6 +52,10 @@ export class Hub {
             this._handleReportResult(msg);
             break;
 
+          case MSG.SESSIONS_RESULT:
+            this._handleSessionsResult(msg);
+            break;
+
           case MSG.EVENT:
             this._handleEvent(msg);
             break;
@@ -229,6 +233,36 @@ export class Hub {
       this.pendingCallbacks.delete(msg.requestId);
       cb({ success: msg.success, report: msg.report, error: msg.error });
     }
+  }
+
+  _handleSessionsResult(msg) {
+    const cb = this.pendingCallbacks.get(msg.requestId);
+    if (cb) {
+      this.pendingCallbacks.delete(msg.requestId);
+      cb({ success: msg.success, sessions: msg.sessions || [], error: msg.error });
+    }
+  }
+
+  // Ask every connected workhorse for its adoptable sessions and aggregate them,
+  // tagged by workhorse and by whether they're already managed (sessionId match).
+  async listSessions() {
+    const connected = this.getConnectedWorkhorses();
+    const tracking = readTracking();
+    const managed = new Set(
+      Object.values(tracking.instances).map(i => i.sessionId).filter(Boolean)
+    );
+    const groups = await Promise.all(connected.map(async (whId) => {
+      const r = await this.sendCommand(whId, CMD.LIST_SESSIONS);
+      const wh = tracking.workhorses[whId];
+      const sessions = (r.sessions || []).map(s => ({ ...s, managed: managed.has(s.sessionId) }));
+      return {
+        workhorseId: whId,
+        workhorseName: (wh && wh.name) || whId,
+        error: r.success === false ? (r.error || 'list-sessions failed') : null,
+        sessions,
+      };
+    }));
+    return groups;
   }
 
   _handleEvent(msg) {

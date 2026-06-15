@@ -94,6 +94,17 @@ export class ServerConnection {
     }));
   }
 
+  sendSessionsResult({ sessions, success, error, requestId }) {
+    if (!this.connected) return;
+    this.ws.send(makeMessage(MSG.SESSIONS_RESULT, {
+      workhorseId: this.workhorseId,
+      sessions,
+      success,
+      error,
+      requestId,
+    }));
+  }
+
   sendEvent({ instanceId, event }) {
     if (!this.connected) return;
     this.ws.send(makeMessage(MSG.EVENT, {

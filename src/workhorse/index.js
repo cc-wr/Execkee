@@ -4,6 +4,7 @@ import { join } from 'path';
 import config from '../common/config.js';
 import { CMD } from '../common/protocol.js';
 import { killActiveClaudeRuns } from '../common/exec-async.js';
+import { listLocalSessions } from './reporter.js';
 import { ServerConnection } from './connection.js';
 import { InstanceManager } from './instances.js';
 
@@ -72,6 +73,12 @@ const connection = new ServerConnection({
 
       case CMD.UNMANAGE:
         return instanceManager.unmanage(msg.instanceId);
+
+      case CMD.LIST_SESSIONS: {
+        const sessions = listLocalSessions();
+        connection.sendSessionsResult({ requestId: msg.requestId, sessions, success: true });
+        return { success: true };
+      }
 
       default:
         return { success: false, error: `Unknown command: ${msg.command}` };

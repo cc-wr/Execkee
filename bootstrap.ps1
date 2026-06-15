@@ -20,7 +20,8 @@ param(
   [string] $InstallDir = (Join-Path $HOME 'Execkee'),
   [string] $RepoOwner = 'cc-wr',
   [string] $RepoName  = 'Execkee',
-  [string] $Branch = 'master'
+  [string] $Branch = 'master',
+  [switch] $NoLocalWorkhorse
 )
 
 $ErrorActionPreference = 'Stop'
@@ -121,7 +122,12 @@ function Ensure-Repo {
   if ($RepoOwner -eq 'REPLACE_ME') {
     Die "RepoOwner is not set. Edit bootstrap.ps1 (set `$RepoOwner) or pass -RepoOwner <github-user>."
   }
-  if (Test-Path (Join-Path $InstallDir '.git')) { Info "Execkee already cloned at $InstallDir."; return }
+  if (Test-Path (Join-Path $InstallDir '.git')) {
+    Info "Execkee already present at $InstallDir; pulling latest (git pull --ff-only)..."
+    git -C $InstallDir pull --ff-only
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Could not fast-forward (local changes or diverged history); keeping the existing checkout. Resolve with: git -C `"$InstallDir`" status" }
+    return
+  }
   if (Test-Path (Join-Path $InstallDir 'package.json')) { Info "Execkee already present at $InstallDir."; return }
   $repoUrl = "https://github.com/$RepoOwner/$RepoName.git"
   Info "Cloning Execkee from $repoUrl (branch $Branch)..."
@@ -167,7 +173,7 @@ Write-Host ""
 $launcher = Join-Path $InstallDir "execkee-$Mode.ps1"
 if (-not (Test-Path $launcher)) { Die "Launcher $launcher not found in the downloaded repo." }
 if ($Mode -eq 'controller') {
-  & $launcher
+  if ($NoLocalWorkhorse) { & $launcher -NoLocalWorkhorse } else { & $launcher }
 } else {
   & $launcher -ControllerAddress $ControllerAddress -Name $Name
 }

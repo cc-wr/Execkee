@@ -6,6 +6,11 @@
 # window (Ctrl+C) stops the system.
 #
 #   .\execkee-controller.ps1
+#   .\execkee-controller.ps1 -NoLocalWorkhorse   (brain-only; workers run on remote machines)
+
+param(
+  [switch] $NoLocalWorkhorse
+)
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
@@ -56,6 +61,7 @@ if ($lanIps.Count -eq 1) {
   Write-Host ("  where <ip> is this controller's LAN address - candidates: {0}" -f ($lanIps -join ', ')) -ForegroundColor DarkGray
 }
 
+if ($NoLocalWorkhorse) { $env:EXECKEE_NO_LOCAL_WORKHORSE = '1'; Write-Host "Brain-only: no co-located workhorse (workers run on remote machines)." -ForegroundColor DarkGray }
 Write-Host "Starting Execkee controller. The dashboard will open shortly; the primary window will appear." -ForegroundColor Green
 Write-Host "Press Ctrl+C here to stop the whole system." -ForegroundColor DarkGray
 node src/supervisor.js controller

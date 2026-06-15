@@ -62,6 +62,10 @@ export class DashboardServer {
       return this._handleApiDashboardData(req, res);
     }
 
+    if (url.pathname === '/api/sessions') {
+      return this._handleApiSessions(req, res);
+    }
+
     if (url.pathname === '/api/resolve' && req.method === 'POST') {
       return this._handleApiResolve(req, res);
     }
@@ -97,6 +101,17 @@ export class DashboardServer {
     const state = this.hub.queryState();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(state));
+  }
+
+  async _handleApiSessions(req, res) {
+    try {
+      const workhorses = await this.hub.listSessions();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ workhorses }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ workhorses: [], error: err.message }));
+    }
   }
 
   async _handleApiDispatch(req, res) {

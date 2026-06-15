@@ -23,7 +23,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 3;
+const BRIEF_VERSION = 4;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -244,10 +244,10 @@ wants deltas-only.
 
 \`node "${CLI}" <command>\`:
 - \`status\` / \`instances\` — workhorses + instances
-- \`sessions\` — Claude sessions available to adopt
+- \`sessions\` — adoptable sessions, grouped by workhorse (which machine each lives on)
 - \`sentence\` / \`dashboard\` — current dashboard sentence / raw data
-- \`manage <session-id> [name] [--path <p>] [--from-now] [--open]\` — adopt (baseline by default)
-- \`create "<name>" [path]\` — new managed instance
+- \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default.
+- \`create "<name>" [path] [--on <workhorse-id>]\` — new managed instance (on a chosen machine)
 - \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close
 - \`resolve <issue-id> <message>\` — mark a dashboard issue resolved (space-delimited, no quotes)
 - \`issue add <text>\` — log a backlog item
@@ -289,13 +289,20 @@ Remember: only call \`resolve\` when my message actually resolves the displayed 
 function startController() {
   log('controller', `root: ${ROOT}`);
   superviseNode('server', ['src/server/index.js']);
-  setTimeout(() => {
-    // D1: the co-located workhorse gets its OWN data dir (a local mirror), so
-    // loopback behaves exactly like a remote machine — no shared-file aliasing
-    // with the controller's master tracking.
-    superviseNode('workhorse', ['src/workhorse/index.js', `ws://localhost:${config.WS_PORT}`, 'wh-local', hostname()],
-      { EXECKEE_DATA_DIR: join(config.DATA_DIR, 'wh-local') });
-  }, 2500);
+  // The co-located workhorse is optional: set EXECKEE_NO_LOCAL_WORKHORSE=1 to run
+  // the controller brain-only, with workers living on remote machines.
+  const noLocalWh = ['1', 'true', 'yes'].includes(String(process.env.EXECKEE_NO_LOCAL_WORKHORSE || '').toLowerCase());
+  if (noLocalWh) {
+    log('controller', 'co-located workhorse disabled (EXECKEE_NO_LOCAL_WORKHORSE) — workers run on remote machines only');
+  } else {
+    setTimeout(() => {
+      // D1: the co-located workhorse gets its OWN data dir (a local mirror), so
+      // loopback behaves exactly like a remote machine — no shared-file aliasing
+      // with the controller's master tracking.
+      superviseNode('workhorse', ['src/workhorse/index.js', `ws://localhost:${config.WS_PORT}`, 'wh-local', hostname()],
+        { EXECKEE_DATA_DIR: join(config.DATA_DIR, 'wh-local') });
+    }, 2500);
+  }
   setTimeout(() => {
     startPrimary();
     openDashboard();
