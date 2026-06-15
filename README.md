@@ -9,6 +9,26 @@ the full design (and Codicil A for the Phase-0 implementation decisions).
 This is the **Phase 0** build: controller and one workhorse co-located on a single
 Windows machine.
 
+## Install on a fresh machine (one line)
+
+No prior setup needed — this installs Node.js, Claude Code, and Execkee (no admin,
+no winget), then starts the controller. In **PowerShell**:
+
+```powershell
+irm https://raw.githubusercontent.com/cc-wr/Execkee/master/bootstrap.ps1 | iex
+```
+
+You'll complete a one-time Claude Code browser login when prompted. To add a
+workhorse on a second machine, point it at the controller's LAN address (shown in
+the controller window on startup):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/cc-wr/Execkee/master/bootstrap.ps1))) -Mode workhorse -ControllerAddress <controller-ip>:7700
+```
+
+If you already have the repo and the prerequisites below, skip to **Start the
+controller**.
+
 ## Prerequisites
 
 - **Node.js** (18+) on `PATH`

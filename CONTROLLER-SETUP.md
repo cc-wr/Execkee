@@ -45,7 +45,7 @@ Credentials are saved to `%USERPROFILE%\.claude\.credentials.json` — you log i
 
 With Git:
 ```powershell
-git clone <your-execkee-repo-url> Execkee
+git clone https://github.com/cc-wr/Execkee.git Execkee
 cd Execkee
 ```
 Or copy the `Execkee` folder over (USB / network share) and `cd` into it.

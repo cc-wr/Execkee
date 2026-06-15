@@ -14,6 +14,13 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
+# Self-heal PATH: a prior install may have updated the User PATH in a way this
+# terminal hasn't picked up yet. Re-merge it (and the Claude bin) before checking.
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if ($userPath) { $env:Path = "$env:Path;$userPath" }
+$claudeBin = Join-Path $HOME '.local\bin'
+if ((-not (Get-Command claude -ErrorAction SilentlyContinue)) -and (Test-Path $claudeBin)) { $env:Path = "$claudeBin;$env:Path" }
+
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Write-Error "Node.js is not on PATH. Install Node, then re-run."
   exit 1
