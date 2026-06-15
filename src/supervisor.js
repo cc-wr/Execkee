@@ -19,10 +19,12 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import config from './common/config.js';
 import { readTracking, writeTracking } from './common/tracking.js';
+import { listLocalSessions, getSessionCwd, getSessionJsonlPath } from './workhorse/reporter.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
+const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
 const BRIEF_VERSION = 8;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
@@ -120,13 +122,33 @@ function ensurePrimaryFolderTrusted() {
   }
 }
 
-function launchPrimaryWindow() {
-  const cwd = config.LIFE_TASKS_DIR;
-  const settings = ensurePrimarySettings();
-  // Pass the whole arg line as ONE PowerShell string with each value
-  // double-quoted, so the multi-word seed prompt reaches claude intact
-  // (an -ArgumentList @(...) array splits space-containing elements).
-  const argLine = `--dangerously-skip-permissions --settings "${settings}" "${PRIMARY_SEED}"`;
+function readPrimarySessionId() {
+  try {
+    if (!existsSync(PRIMARY_SESSION_FILE)) return null;
+    const o = JSON.parse(readFileSync(PRIMARY_SESSION_FILE, 'utf-8'));
+    return (o && o.sessionId) || null;
+  } catch { return null; }
+}
+
+function writePrimarySessionId(sessionId) {
+  try { writeFileSync(PRIMARY_SESSION_FILE, JSON.stringify({ sessionId, updatedAt: new Date().toISOString() }, null, 2), 'utf-8'); } catch {}
+}
+
+const _normPath = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
+
+// A resumable primary = a stored session whose transcript still exists AND whose cwd
+// is the life-tasks dir (so we never --resume an unrelated session).
+function resumablePrimarySession() {
+  const id = readPrimarySessionId();
+  if (!id || !getSessionJsonlPath(id)) return null;
+  const cwd = getSessionCwd(id);
+  if (cwd && _normPath(cwd) !== _normPath(config.LIFE_TASKS_DIR)) return null;
+  return id;
+}
+
+function launchClaude(cwd, argLine) {
+  // Pass the whole arg line as ONE PowerShell string with each value double-quoted,
+  // so a multi-word seed reaches claude intact (an -ArgumentList @(...) array splits).
   const psArgLine = argLine.replace(/'/g, "''");
   const psCmd = `$p = Start-Process claude -WorkingDirectory '${cwd}' -ArgumentList '${psArgLine}' -PassThru; Write-Output $p.Id`;
   try {
@@ -138,6 +160,43 @@ function launchPrimaryWindow() {
     log('primary', `launch failed: ${err.message}`);
     return null;
   }
+}
+
+// Shortly after a FRESH launch, record the primary's new session (the one created in
+// the life-tasks dir) so a later restart can --resume it. Best-effort.
+function schedulePrimaryCapture(beforeIds) {
+  setTimeout(() => {
+    try {
+      for (const s of listLocalSessions()) {
+        if (beforeIds.has(s.sessionId)) continue;
+        if (_normPath(getSessionCwd(s.sessionId)) === _normPath(config.LIFE_TASKS_DIR)) {
+          writePrimarySessionId(s.sessionId);
+          log('primary', `captured primary session ${s.sessionId.slice(0, 8)} for resume-on-restart`);
+          return;
+        }
+      }
+    } catch {}
+  }, 12_000);
+}
+
+function launchPrimaryWindow() {
+  const cwd = config.LIFE_TASKS_DIR;
+  const settings = ensurePrimarySettings();
+
+  // Resume the prior primary conversation across restarts when we have a valid one.
+  const resumeId = resumablePrimarySession();
+  if (resumeId) {
+    const pid = launchClaude(cwd, `--dangerously-skip-permissions --resume ${resumeId} --settings "${settings}"`);
+    if (pid) { log('primary', `launched (resumed ${resumeId.slice(0, 8)}) pid=${pid}`); return pid; }
+    log('primary', 'resume launch produced no pid — falling back to a fresh primary');
+  }
+
+  // Fresh launch: snapshot sessions first so we can capture the new one, then seed.
+  const before = new Set(listLocalSessions().map(s => s.sessionId));
+  const pid = launchClaude(cwd, `--dangerously-skip-permissions --settings "${settings}" "${PRIMARY_SEED}"`);
+  if (pid) schedulePrimaryCapture(before);
+  log('primary', `launched fresh pid=${pid}`);
+  return pid;
 }
 
 let primaryRelaunches = [];
