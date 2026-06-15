@@ -9,6 +9,7 @@ import {
   readResolutions, writeResolutions,
 } from './common/store.js';
 import { DESIRED_STATE, VISIBILITY, CMD } from './common/protocol.js';
+import { readContextSources } from './common/context-sources.js';
 import config from './common/config.js';
 
 export async function runCoworkCycle(hub) {
@@ -57,9 +58,10 @@ export async function runCoworkCycle(hub) {
     }
   }
 
-  // Step 3: Reconcile resolutions
+  // Step 3: Reconcile resolutions + read extra context (tracking log + configured sources)
   const resolutions = readResolutions();
   const previousQueue = readSentenceQueue();
+  const contextSources = readContextSources();
 
   // Step 4 + 5: Author cycle report and derive sentence queue
   const cycleReport = await authorCycleReport({
@@ -70,6 +72,7 @@ export async function runCoworkCycle(hub) {
     resolutions,
     previousQueue,
     tracking,
+    contextSources,
   });
   writeCycleReport(cycleReport);
 
@@ -166,7 +169,7 @@ export function refreshDashboardTasks() {
   return dailyTasks.tasks.length;
 }
 
-async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports, resolutions, previousQueue, tracking }) {
+async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports, resolutions, previousQueue, tracking, contextSources }) {
   const overdueTasks = dailyTasks.tasks.filter(t => t.status === 'overdue');
   const dueTodayTasks = dailyTasks.tasks.filter(t => t.status === 'due-today');
   const incompleteTasks = dailyTasks.tasks.filter(t => !t.complete);
@@ -181,6 +184,7 @@ async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports
     instanceReports,
     failedInstances,
     recentResolutions: resolutions.log.slice(-10),
+    contextSources,
   });
 
   try {
@@ -245,7 +249,7 @@ function parseSynthesis(output) {
   return null;
 }
 
-function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incompleteTasks, instanceReports, failedInstances, recentResolutions }) {
+function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incompleteTasks, instanceReports, failedInstances, recentResolutions, contextSources }) {
   const sections = [];
 
   sections.push(`Current time: ${cycleTime}. Today: ${today}.`);
@@ -288,10 +292,14 @@ function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incom
   if (recentResolutions.length > 0) {
     sections.push(`RECENTLY RESOLVED:\n${recentResolutions.map(r => `- ${r.issueId}: ${r.message}`).join('\n')}`);
   }
+  if (contextSources && contextSources.trim()) {
+    sections.push(`ADDITIONAL CONTEXT (the user's tracking log + configured source files):\n${contextSources}`);
+  }
 
   return [
     'You are the life-management cycle reporter. Synthesize the data below into a cycle report.',
     'Prioritize by urgency. Highest first: anything explicitly URGENT or with an imminent/missed-but-recoverable deadline (this INCLUDES "needs attention" items from instance reports, not just tasks), then overdue tasks, then due-today, then blocked work, then failed instances, then everything else.',
+    'Weigh the ADDITIONAL CONTEXT if present: the TRACKING LOG is binding — do NOT surface an issue the user has deferred (until any stated date) and reflect their decisions ("waiting on X", "dropped Y"); treat other configured sources (e.g. a life-tasks document) as real task/context input alongside the task list above.',
     'Instance-report action items are first-class: a report whose summary sounds "done" can still carry an urgent embedded deadline in its NEEDS ATTENTION list — surface that, do not bury it. Each pressing report item should get its own sentence.',
     'Also extract "presumed tasks": concrete action items implied by the instance ' +
     'reports (their NEEDS ATTENTION / BLOCKED / IN PROGRESS items) that are NOT already ' +

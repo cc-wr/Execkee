@@ -24,7 +24,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 7;
+const BRIEF_VERSION = 8;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -205,6 +205,12 @@ function ensureLifeTasksScaffold() {
     writeFileSync(trackingMd, trackingLogScaffold(), 'utf-8');
     log('primary', `wrote tracking log scaffold: ${trackingMd}`);
   }
+
+  // Write-once: manifest of extra files the cycle reads as context.
+  if (!existsSync(config.CONTEXT_SOURCES_FILE)) {
+    writeFileSync(config.CONTEXT_SOURCES_FILE, contextSourcesScaffold(), 'utf-8');
+    log('primary', `wrote context-sources scaffold: ${config.CONTEXT_SOURCES_FILE}`);
+  }
 }
 
 function primaryOperatorBrief() {
@@ -323,6 +329,12 @@ Friday", "not now"), **new information** ("the deadline moved", "they replied"),
 each entry dated. **Before** resolving a sentence or surfacing a presumed task, check
 TRACKING.md first, so you never re-raise or contradict something the user already
 deferred or decided.
+
+**Extra context files.** The cycle also reads any files listed in
+\`${config.CONTEXT_SOURCES_FILE}\` (e.g. a Word doc of life tasks). When the user says
+"also track / watch / read my <file>", add \`{ "path": "<full path>", "label": "<name>" }\`
+to that JSON (supported: .md/.txt/.json/.csv and .docx on Windows), then run \`run-cycle\`
+so it's picked up.
 `;
 }
 
@@ -349,6 +361,13 @@ something the user already deferred or decided.
 
 ---
 `;
+}
+
+function contextSourcesScaffold() {
+  return JSON.stringify({
+    _comment: 'Extra files the 30-minute cycle reads as context, in addition to tasks.json and TRACKING.md. Add { "path": "C:/full/path/file.docx", "label": "short name" } entries. Supported: .md .txt .json .csv .log and .docx (Windows). Paths are on THIS controller machine.',
+    sources: [],
+  }, null, 2) + '\n';
 }
 
 // --- Wiring ---
