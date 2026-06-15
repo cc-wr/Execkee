@@ -132,6 +132,10 @@ function Ensure-Repo {
 
 # --- main ---
 Info "Execkee setup - mode: $Mode, install dir: $InstallDir"
+# Fresh machines default to a Restricted ExecutionPolicy, which blocks npm.ps1
+# and the launcher .ps1. Allow scripts for THIS run (process scope only - the
+# persistent CurrentUser policy is set to RemoteSigned after install, below).
+try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch {}
 if ($Mode -eq 'workhorse' -and -not $ControllerAddress) {
   Die "Workhorse mode needs -ControllerAddress <host:port> (e.g. 192.168.1.50:7700)."
 }

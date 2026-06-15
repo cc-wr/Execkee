@@ -10,6 +10,10 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
+# Allow npm.ps1 / scripts to run on a fresh machine (default Restricted policy);
+# process scope only, transient to this launch.
+try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch {}
+
 # Self-heal PATH: a prior install may have updated the User PATH in a way this
 # terminal hasn't picked up yet. Re-merge it (and the Claude bin) before checking.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
