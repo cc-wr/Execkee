@@ -31,29 +31,29 @@ export async function runCoworkCycle(hub) {
 
   for (const inst of instances) {
     if (inst.desiredState !== DESIRED_STATE.ALIVE) continue;
+
+    let report = null;
     if (inst.visibility === VISIBILITY.FOREGROUND) {
-      console.log(`[cowork] Skip ${inst.id}: foregrounded`);
-      continue;
+      // The user holds it — never fork (visibility = lock), but its last known
+      // report (and its pending action items) is still current context.
+      console.log(`[cowork] ${inst.id} foregrounded — using last report if any`);
+      report = inst.lastReportContent || null;
+    } else if (hub) {
+      console.log(`[cowork] Requesting report for ${inst.id}...`);
+      const result = await hub.sendCommand(inst.workhorseId, CMD.REPORT, { instanceId: inst.id });
+      if (result?.success) {
+        report = result.report;
+      } else {
+        // Unchanged (skipped) or a failed fork — fall back to the latest stored
+        // report so pending items keep surfacing instead of disappearing.
+        if (result?.skipped) console.log(`[cowork] ${inst.id} unchanged — using last report`);
+        else console.log(`[cowork] Report failed for ${inst.id}: ${result?.error} — using last report`);
+        report = inst.lastReportContent || null;
+      }
     }
 
-    if (hub) {
-      console.log(`[cowork] Requesting report for ${inst.id}...`);
-      const result = await hub.sendCommand(inst.workhorseId, CMD.REPORT, {
-        instanceId: inst.id,
-      });
-
-      if (result?.success) {
-        instanceReports.push({
-          instanceId: inst.id,
-          name: inst.name,
-          report: result.report,
-          timestamp: cycleTime,
-        });
-      } else if (result?.skipped) {
-        console.log(`[cowork] Skip ${inst.id}: unchanged`);
-      } else {
-        console.log(`[cowork] Report failed for ${inst.id}: ${result?.error}`);
-      }
+    if (report) {
+      instanceReports.push({ instanceId: inst.id, name: inst.name, report, timestamp: cycleTime });
     }
   }
 
@@ -233,7 +233,27 @@ function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incom
     sections.push(`ALL INCOMPLETE (${incompleteTasks.length}):\n${incompleteTasks.slice(0, 20).map(t => `- ${t.text} (${t.priority}, ${t.status})`).join('\n')}`);
   }
   if (instanceReports.length > 0) {
-    sections.push(`INSTANCE REPORTS:\n${instanceReports.map(r => `[${r.name}] ${JSON.stringify(r.report?.summary || r.report)}`).join('\n')}`);
+    const fmt = (r) => {
+      const rep = r.report || {};
+      const lines = [`[${r.name}] topic: ${rep.topic || '(unknown)'}`];
+      const list = (label, arr) => {
+        if (Array.isArray(arr) && arr.length) lines.push(`  ${label}:\n${arr.map(x => `    - ${x}`).join('\n')}`);
+      };
+      // NEEDS ATTENTION / BLOCKED / IN PROGRESS are the real, often time-sensitive
+      // action items — surface them, not just the (sometimes rosy) summary.
+      list('NEEDS ATTENTION', rep.needsAttention);
+      list('BLOCKED', rep.blocked);
+      list('IN PROGRESS', rep.inProgress);
+      if (rep.summary) lines.push(`  summary: ${rep.summary}`);
+      if (!rep.topic && !rep.summary) lines.push(`  ${JSON.stringify(rep).slice(0, 1500)}`);
+      return lines.join('\n');
+    };
+    sections.push(
+      'INSTANCE REPORTS (work the user is doing in managed conversations; their ' +
+      'NEEDS ATTENTION and BLOCKED items are real action items, frequently with ' +
+      'deadlines — treat them as first-class issues, not background):\n' +
+      instanceReports.map(fmt).join('\n\n')
+    );
   }
   if (failedInstances.length > 0) {
     sections.push(`FAILED INSTANCES:\n${failedInstances.map(i => `- ${i.name} (${i.id}): crash-looped`).join('\n')}`);
@@ -244,7 +264,8 @@ function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incom
 
   return [
     'You are the life-management cycle reporter. Synthesize the data below into a cycle report.',
-    'Prioritize by urgency: overdue > due-today > blocked > failed-instances > other.',
+    'Prioritize by urgency. Highest first: anything explicitly URGENT or with an imminent/missed-but-recoverable deadline (this INCLUDES "needs attention" items from instance reports, not just tasks), then overdue tasks, then due-today, then blocked work, then failed instances, then everything else.',
+    'Instance-report action items are first-class: a report whose summary sounds "done" can still carry an urgent embedded deadline in its NEEDS ATTENTION list — surface that, do not bury it. Each pressing report item should get its own sentence.',
     'Output JSON:',
     '{',
     '  "summary": "one-paragraph synthesis",',
