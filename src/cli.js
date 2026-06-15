@@ -110,7 +110,7 @@ switch (cmd) {
   case 'manage': {
     const [sessionId, ...rest] = args;
     if (!sessionId) {
-      console.error('Usage: manage <session-id> [name] [--on <workhorse-id>] [--path <project-path>] [--from-now] [--open]');
+      console.error('Usage: manage <session-id> [name] [--on <workhorse-id>] [--path <project-path>] [--from-now] [--open] [--full-permissions]');
       process.exit(1);
     }
     let name = 'Managed Session';
@@ -132,6 +132,11 @@ switch (cmd) {
     let alreadyOpen = false;
     const openIdx = rest.indexOf('--open');
     if (openIdx >= 0) { alreadyOpen = true; rest.splice(openIdx, 1); }
+    // Adopt with full permissions: launch the resumed instance with
+    // --dangerously-skip-permissions so it runs unattended (no approval prompts).
+    let skipPermissions = false;
+    const fpIdx = rest.findIndex(a => a === '--full-permissions' || a === '--skip-permissions' || a === '--yolo');
+    if (fpIdx >= 0) { skipPermissions = true; rest.splice(fpIdx, 1); }
     // --on <workhorse-id>: force which workhorse adopts (else auto-route below).
     let onWorkhorse = null;
     const onIdx = rest.indexOf('--on');
@@ -165,11 +170,12 @@ switch (cmd) {
       projectPath,
       baseline,
       alreadyOpen,
+      skipPermissions,
     });
     if (result.success === false) {
       console.log(`Failed: ${result.error}`);
     } else {
-      console.log(`Managed as ${instanceId}${baseline ? '' : ' (from now)'}${alreadyOpen ? ' (adopted as foreground)' : ''}`);
+      console.log(`Managed as ${instanceId}${baseline ? '' : ' (from now)'}${alreadyOpen ? ' (adopted as foreground)' : ''}${skipPermissions ? ' [full permissions]' : ''}`);
     }
     break;
   }
@@ -337,7 +343,7 @@ switch (cmd) {
     console.log('  instances                  Detailed instance list');
     console.log('  sentence                   Show current dashboard sentence');
     console.log('  resolve <id> <msg>         Resolve a dashboard issue');
-    console.log('  manage <session-id> [name] [--on <wh>]  Adopt a session (auto-routes to its workhorse)');
+    console.log('  manage <session-id> [name] [--on <wh>] [--full-permissions]  Adopt a session (auto-routes to its workhorse)');
     console.log('  create <name> [path] [--on <wh>]        Create a new managed instance');
     console.log('  foreground <instance-id>   Bring an instance to front');
     console.log('  hide <instance-id>         Hide an instance');

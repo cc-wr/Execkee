@@ -196,13 +196,17 @@ function doLaunch(instanceId, claudeArgs, projectPath) {
   return { pid, windowHandle };
 }
 
-export function launchInstance(instanceId, sessionId, projectPath) {
+export function launchInstance(instanceId, sessionId, projectPath, options = {}) {
   // A session-less instance (e.g. one created with no captured session) cannot be
   // --resume'd; launch it as a fresh window rather than passing '--resume undefined',
   // which builds a malformed ArgumentList and crash-loops (see KI-1).
   if (!sessionId) return createNewInstance(instanceId, projectPath);
-  const result = doLaunch(instanceId, ['--resume', sessionId], projectPath);
-  console.log(`[adapter-win] Launched ${instanceId}: pid=${result.pid} hwnd=${result.windowHandle}`);
+  const claudeArgs = ['--resume', sessionId];
+  // Adopt-with-full-permissions: run unattended, no approval prompts (silent on
+  // Windows). Compatible with --resume — the primary launches the same way.
+  if (options.skipPermissions) claudeArgs.push('--dangerously-skip-permissions');
+  const result = doLaunch(instanceId, claudeArgs, projectPath);
+  console.log(`[adapter-win] Launched ${instanceId}: pid=${result.pid} hwnd=${result.windowHandle}${options.skipPermissions ? ' [full permissions]' : ''}`);
   return result;
 }
 

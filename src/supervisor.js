@@ -26,7 +26,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 8;
+const BRIEF_VERSION = 9;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -318,6 +318,11 @@ is read on the first cycle) and **auto-runs a cycle** so the report appears at o
 Just adopt — don't ask about baseline. Use \`--from-now\` only if the user explicitly
 wants deltas-only.
 
+**Full permissions.** If the user says "adopt with full permissions" / "give it full
+permissions" / "let it run unattended", append \`--full-permissions\` — the adopted
+instance then runs with approval prompts disabled, and the mode is durable across
+relaunch (crash-recovery / restart keep it).
+
 ## Releasing vs closing an instance
 
 Two different "stop" actions — choose by what the user means:
@@ -338,7 +343,7 @@ Two different "stop" actions — choose by what the user means:
 - \`sentence\` / \`dashboard\` — current dashboard sentence / raw data
 - \`run-cycle\` — force a cycle now (re-reads instances + tasks, regenerates the dashboard)
 - \`refresh-tasks\` — instantly refresh the dashboard's task list after a task edit (cheap; no cycle)
-- \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default.
+- \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open] [--full-permissions]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default. \`--full-permissions\` runs it unattended (skips approval prompts).
 - \`create "<name>" [path] [--on <workhorse-id>]\` — new managed instance (on a chosen machine)
 - \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close (shuts the window; the session stays re-adoptable)
 - \`unmanage <id>\` — release / un-adopt (stop managing; leaves the window running)

@@ -80,7 +80,7 @@ export class InstanceManager {
     return { success: true, instance: record };
   }
 
-  manageExisting({ id, name, sessionId, projectPath, baseline, alreadyOpen }) {
+  manageExisting({ id, name, sessionId, projectPath, baseline, alreadyOpen, skipPermissions }) {
     // §4.6b step 1: resolve a partial/short id to the full session id and verify
     // it exists on disk BEFORE adopting (the full id is what `claude --resume`
     // and the report fork require).
@@ -107,6 +107,8 @@ export class InstanceManager {
       visibility: VISIBILITY.HIDDEN,
     });
     record.watermark = { position, timestamp: new Date().toISOString() };
+    // Persisted so crash-recovery / restart relaunch with the same permission mode.
+    record.skipPermissions = !!skipPermissions;
 
     // §4.6b secondary: the session is already open in a GUI the user holds.
     // Adopt the record as foreground (so it's never reported on until hidden)
@@ -125,7 +127,7 @@ export class InstanceManager {
 
     // Common case (not currently open): resume it, verify the launch, and only
     // THEN persist — adoption is atomic, no partial/orphan record on failure.
-    const launched = adapter.launchInstance(id, sessionId, effectivePath);
+    const launched = adapter.launchInstance(id, sessionId, effectivePath, { skipPermissions });
     if (!launched.pid) {
       return { success: false, error: 'Launch failed — session not adopted' };
     }
@@ -267,6 +269,7 @@ export class InstanceManager {
       lastReportContent: inst.lastReportContent,
       reportFailureCount: inst.reportFailureCount,
       lastReportError: inst.lastReportError,
+      skipPermissions: inst.skipPermissions,
       processAlive: adapter.isProcessAlive(inst.pid),
       lastActivityTime: inst.lastActivityTime,
     }));
@@ -274,7 +277,7 @@ export class InstanceManager {
 
   _launchAndMonitor(inst) {
     console.log(`[instances] Launching instance ${inst.id} (session: ${inst.sessionId})`);
-    const launched = adapter.launchInstance(inst.id, inst.sessionId, inst.projectPath);
+    const launched = adapter.launchInstance(inst.id, inst.sessionId, inst.projectPath, { skipPermissions: inst.skipPermissions });
     const tracking = readTracking();
     updateInstance(tracking, inst.id, {
       pid: launched.pid,
