@@ -258,9 +258,15 @@ function ensureLifeTasksScaffold() {
     log('primary', `wrote /execkee command: ${execkeeCmd}`);
   }
 
-  // Write-once: the primary maintains this log; never clobber the user's entries.
+  // Write-once normally; but self-heal a TRACKING.md that the old duplicate
+  // TRACKING_FILE key clobbered with tracking JSON (a real markdown log never
+  // starts with '{'). Never clobber a genuine log the primary maintains.
   const trackingMd = join(dir, 'TRACKING.md');
-  if (!existsSync(trackingMd)) {
+  let writeTrackingMd = !existsSync(trackingMd);
+  if (!writeTrackingMd) {
+    try { writeTrackingMd = readFileSync(trackingMd, 'utf-8').trimStart().startsWith('{'); } catch {}
+  }
+  if (writeTrackingMd) {
     writeFileSync(trackingMd, trackingLogScaffold(), 'utf-8');
     log('primary', `wrote tracking log scaffold: ${trackingMd}`);
   }

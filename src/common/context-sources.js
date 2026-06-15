@@ -43,8 +43,8 @@ export function readContextSources() {
   const parts = [];
 
   // 1. Tracking log — always included if present (deferrals/decisions are binding).
-  if (existsSync(config.TRACKING_FILE)) {
-    const t = readTextFile(config.TRACKING_FILE).trim();
+  if (existsSync(config.TRACKING_LOG_FILE)) {
+    const t = readTextFile(config.TRACKING_LOG_FILE).trim();
     if (t) parts.push({ label: 'TRACKING LOG (user deferrals / decisions / new info — RESPECT THESE)', text: t });
   }
 

@@ -23,7 +23,7 @@ export default Object.freeze({
   LIFE_TASKS_DIR,
   PLATFORM: platform(),
 
-  TRACKING_FILE: join(DATA_DIR, 'tracking.json'),
+  TRACKING_FILE: join(DATA_DIR, 'tracking.json'),  // JSON instance/workhorse master store (tracking.js)
   STATE_FILE: join(DATA_DIR, 'state.json'),
 
   CYCLE_REPORT_FILE: join(SHARED_STORE_DIR, 'cycle-report.json'),
@@ -32,7 +32,7 @@ export default Object.freeze({
   RESOLUTIONS_FILE: join(SHARED_STORE_DIR, 'resolutions.json'),
   DASHBOARD_DATA_FILE: join(SHARED_STORE_DIR, 'dashboard-data.json'),
   LIFE_TASKS_FILE: join(LIFE_TASKS_DIR, 'tasks.json'),
-  TRACKING_FILE: join(LIFE_TASKS_DIR, 'TRACKING.md'),
+  TRACKING_LOG_FILE: join(LIFE_TASKS_DIR, 'TRACKING.md'),  // primary's markdown log (context-sources.js) — NOT the JSON store
   // Manifest of extra files the cycle synthesis reads as context (a life-tasks
   // .docx, notes, etc.) — { sources: [{ path, label }] }.
   CONTEXT_SOURCES_FILE: join(LIFE_TASKS_DIR, 'context-sources.json'),
