@@ -303,12 +303,16 @@ function buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueToda
 }
 
 function collectFlaggedEvents(tracking) {
-  return Object.values(tracking.instances)
-    .filter(i => i.desiredState === DESIRED_STATE.FAILED)
-    .map(i => ({
-      type: 'instance-failed',
-      instanceId: i.id,
-      name: i.name,
-      crashCount: i.crashCount,
-    }));
+  const events = [];
+  for (const i of Object.values(tracking.instances)) {
+    if (i.desiredState === DESIRED_STATE.FAILED) {
+      events.push({ type: 'instance-failed', instanceId: i.id, name: i.name, crashCount: i.crashCount });
+    }
+    // Surface a report that keeps failing (e.g. the session's model is gone)
+    // rather than letting it retry invisibly forever.
+    if ((i.reportFailureCount || 0) >= 2) {
+      events.push({ type: 'report-failing', instanceId: i.id, name: i.name, crashCount: i.reportFailureCount, error: i.lastReportError });
+    }
+  }
+  return events;
 }

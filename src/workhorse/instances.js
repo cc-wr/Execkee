@@ -161,14 +161,28 @@ export class InstanceManager {
 
     const fresh = readTracking();
     if (result.success) {
+      if (result.modelUsed && result.modelUsed !== 'session-default') {
+        console.log(`[instances] ${instanceId} report used fallback model '${result.modelUsed}'`);
+      }
       updateInstance(fresh, instanceId, {
         heldBySubcontroller: false,
         lastReportTime: new Date().toISOString(),
         lastReportContent: result.report,
         watermark: result.watermark,
+        reportFailureCount: 0,
+        lastReportError: null,
       });
     } else {
-      updateInstance(fresh, instanceId, { heldBySubcontroller: false });
+      // Don't advance the watermark (so it retries), but make the persistent
+      // failure loud — count it, record the reason, and flag it upward.
+      const count = (inst.reportFailureCount || 0) + 1;
+      console.error(`[instances] REPORT FAILED for ${instanceId} (${inst.name}), attempt ${count}: ${result.error}`);
+      updateInstance(fresh, instanceId, {
+        heldBySubcontroller: false,
+        reportFailureCount: count,
+        lastReportError: result.error,
+      });
+      this.onEvent({ type: 'report-failed', instanceId, error: result.error, count, attempts: result.attempts });
     }
     writeTracking(fresh);
 

@@ -37,6 +37,11 @@ export default Object.freeze({
   CYCLE_INTERVAL_MS: 30 * 60 * 1000,
   CRASH_RETRY_MAX: 5,
   CRASH_RETRY_BASE_MS: 2000,
+  // Report fork tries the session's own model first; if that fails (e.g. the
+  // session's model is unavailable), it falls back to these in order. Haiku is
+  // first: it is fast and summarizes fine; sonnet can time out on large sessions.
+  REPORT_FALLBACK_MODELS: ['haiku', 'sonnet'],
+  REPORT_TIMEOUT_MS: 180_000,
   HEARTBEAT_INTERVAL_MS: 30_000,
   RECONNECT_INTERVAL_MS: 5000,
 

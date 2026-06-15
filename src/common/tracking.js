@@ -43,6 +43,8 @@ export function createInstanceRecord({ id, workhorseId, name, projectPath, sessi
     watermark: { position: 0, timestamp: null },
     lastReportTime: null,
     lastReportContent: null,
+    reportFailureCount: 0,
+    lastReportError: null,
     lastActivityTime: now,
     createdAt: now,
     crashCount: 0,

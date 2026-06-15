@@ -2,6 +2,7 @@ import { statSync, existsSync, readdirSync, openSync, readSync, closeSync } from
 import { join } from 'path';
 import { homedir } from 'os';
 import { claudeRun } from '../common/exec-async.js';
+import config from '../common/config.js';
 
 const REPORT_PROMPT = [
   'You are producing a status report for this Claude Code conversation.',
@@ -73,52 +74,78 @@ export function hasSessionChanged(sessionId, watermark) {
   return currentPosition > (watermark?.position || 0);
 }
 
-export async function runForkReport(sessionId, cwd) {
+// Parse a `--output-format json` fork output into {ok, resultText, errorReason}.
+// `claude` can fail two ways: a non-zero exit (the output arrives on err.stdout),
+// or exit 0 with a result event carrying is_error:true (e.g. model unavailable).
+function parseForkResult(output) {
   try {
-    const options = {};
-    // Resume is project-scoped: fork from the session's own working directory.
-    const dir = cwd || getSessionCwd(sessionId);
-    if (dir && existsSync(dir)) options.cwd = dir;
-    const output = await claudeRun([
-      '-p',
-      '--resume', sessionId,
-      '--fork-session',
-      '--no-session-persistence',
-      '--output-format', 'json',
-      REPORT_PROMPT,
-    ], options);
-
-    let report;
-    try {
-      const parsed = JSON.parse(output);
-      const events = Array.isArray(parsed) ? parsed : [parsed];
-      const resultEvent = events.findLast(e => e.type === 'result');
-      const resultText = resultEvent?.result || '';
-      let jsonText = resultText.trim();
-      const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/i);
-      if (fence) jsonText = fence[1].trim();
-      try {
-        report = JSON.parse(jsonText);
-      } catch {
-        report = { summary: resultText.substring(0, 2000), raw: true };
-      }
-    } catch {
-      report = { summary: output.substring(0, 2000), raw: true };
+    const parsed = JSON.parse(output);
+    const events = Array.isArray(parsed) ? parsed : [parsed];
+    const res = events.findLast(e => e && e.type === 'result');
+    if (!res) return { ok: false, errorReason: 'no result event in output' };
+    if (res.is_error) {
+      return { ok: false, errorReason: String(res.result || res.error || 'is_error').slice(0, 300) };
     }
-
-    const newPosition = getSessionPosition(sessionId);
-
-    return {
-      success: true,
-      report,
-      watermark: { position: newPosition, timestamp: new Date().toISOString() },
-    };
-  } catch (err) {
-    return {
-      success: false,
-      error: err.message,
-      report: null,
-      watermark: null,
-    };
+    return { ok: true, resultText: res.result || '' };
+  } catch {
+    return { ok: false, errorReason: 'unparseable fork output' };
   }
+}
+
+function buildReport(resultText) {
+  let jsonText = String(resultText || '').trim();
+  const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) jsonText = fence[1].trim();
+  try { return JSON.parse(jsonText); }
+  catch { return { summary: String(resultText || '').substring(0, 2000), raw: true }; }
+}
+
+async function oneFork(sessionId, options, model) {
+  const args = ['-p'];
+  if (model) args.push('--model', model);
+  args.push('--resume', sessionId, '--fork-session', '--no-session-persistence', '--output-format', 'json', REPORT_PROMPT);
+  try {
+    return parseForkResult(await claudeRun(args, options));
+  } catch (err) {
+    // Non-zero exit: the JSON (with the real reason) usually arrives on stdout.
+    const parsed = err.stdout ? parseForkResult(err.stdout) : null;
+    return { ok: false, errorReason: (parsed && parsed.errorReason) || err.message };
+  }
+}
+
+export async function runForkReport(sessionId, cwd) {
+  const options = { timeout: config.REPORT_TIMEOUT_MS };
+  // Resume is project-scoped: fork from the session's own working directory.
+  const dir = cwd || getSessionCwd(sessionId);
+  if (dir && existsSync(dir)) options.cwd = dir;
+
+  // Try the session's own model first (fidelity), then fall back to available
+  // models in order. null = inherit the session's model (no --model flag).
+  const models = [null, ...(config.REPORT_FALLBACK_MODELS || [])];
+  const attempts = [];
+
+  for (const model of models) {
+    const label = model || 'session-default';
+    const r = await oneFork(sessionId, options, model);
+    attempts.push({ model: label, ok: r.ok, error: r.ok ? null : r.errorReason });
+    if (r.ok) {
+      return {
+        success: true,
+        report: buildReport(r.resultText),
+        modelUsed: label,
+        attempts,
+        watermark: { position: getSessionPosition(sessionId), timestamp: new Date().toISOString() },
+      };
+    }
+    console.error(`[reporter] fork for ${sessionId} failed on model '${label}': ${r.errorReason}`);
+  }
+
+  const summary = attempts.map(a => `${a.model}: ${a.error}`).join(' | ');
+  return {
+    success: false,
+    error: `report failed on all models — ${summary}`,
+    attempts,
+    report: null,
+    watermark: null,
+  };
 }
