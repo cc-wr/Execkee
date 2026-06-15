@@ -93,6 +93,29 @@ function ensurePrimarySettings() {
   return PRIMARY_SETTINGS;
 }
 
+// Pre-accept Claude Code's "Do you trust the files in this folder?" gate for the
+// primary's working dir, so the auto-launched window never prompts. Trust lives in
+// ~/.claude.json under projects["<abs path, forward slashes>"].hasTrustDialogAccepted.
+function ensurePrimaryFolderTrusted() {
+  const claudeJson = join(config.HOME, '.claude.json');
+  const key = config.LIFE_TASKS_DIR.replace(/\\/g, '/');
+  let obj = {};
+  if (existsSync(claudeJson)) {
+    try { obj = JSON.parse(readFileSync(claudeJson, 'utf-8')); }
+    catch { log('primary', 'could not parse ~/.claude.json; skipping pre-trust (primary may prompt once)'); return; }
+  }
+  if (!obj.projects) obj.projects = {};
+  if (!obj.projects[key]) obj.projects[key] = {};
+  if (obj.projects[key].hasTrustDialogAccepted === true) return; // already trusted; no write
+  obj.projects[key].hasTrustDialogAccepted = true;
+  try {
+    writeFileSync(claudeJson, JSON.stringify(obj, null, 2), 'utf-8');
+    log('primary', `pre-trusted folder for primary: ${key}`);
+  } catch (err) {
+    log('primary', `could not pre-trust folder (${err.message}); the primary may prompt once`);
+  }
+}
+
 function launchPrimaryWindow() {
   const cwd = config.LIFE_TASKS_DIR;
   const settings = ensurePrimarySettings();
@@ -116,6 +139,7 @@ function launchPrimaryWindow() {
 let primaryRelaunches = [];
 function startPrimary() {
   ensureLifeTasksScaffold();
+  ensurePrimaryFolderTrusted();
   primaryPid = launchPrimaryWindow();
   log('primary', `launched pid=${primaryPid} in ${config.LIFE_TASKS_DIR}`);
   primaryInterval = setInterval(() => {
