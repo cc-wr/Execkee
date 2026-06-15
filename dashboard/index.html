@@ -5,7 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Execkee</title>
   <style>
+    /* Day mode (default) — light, high-contrast, glanceable at a distance. */
     :root {
+      --bg: #f4f6fa;
+      --surface: #ffffff;
+      --surface2: #eef1f6;
+      --border: #d3dae5;
+      --text: #15202e;
+      --muted: #5b6b80;
+      --blue: #1f6fe0;
+      --green: #1c9a52;
+      --amber: #c2780f;
+      --red: #d63b30;
+      --gray: #c4cdda;
+    }
+    /* Night mode — flip with the toggle. */
+    :root[data-theme="dark"] {
       --bg: #0a0e14;
       --surface: #141a23;
       --surface2: #1c2531;
@@ -18,6 +33,7 @@
       --red: #ff5d52;
       --gray: #3a4658;
     }
+    .toggle { cursor: pointer; background: var(--surface2); border: 0.2vmin solid var(--border); color: var(--text); border-radius: 0.8vmin; padding: 0.6vmin 1.2vmin; font-size: 1.8vmin; font-weight: 700; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
     body {
@@ -137,6 +153,7 @@
       <span class="ind" id="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">connecting</span></span>
       <span class="ind"><span class="dot blue"></span><span id="inst-count">0 instances</span></span>
       <span class="ind"><span class="dot" id="cycle-dot"></span><span id="cycle-text">no cycle yet</span></span>
+      <button class="toggle" id="theme-toggle" title="Toggle day/night">☀ Day</button>
     </div>
   </div>
 
@@ -255,6 +272,15 @@
       if(data.cycleTime){const mins=(Date.now()-new Date(data.cycleTime).getTime())/60000;cd.className='dot '+(mins<35?'green':'amber');ct.textContent='cycle '+timeAgo(new Date(data.cycleTime));}
       else{cd.className='dot';ct.textContent='no cycle yet';}
     }
+
+    // Theme: default day (light); persisted across reloads.
+    const tbtn=document.getElementById('theme-toggle');
+    function applyTheme(t){
+      if(t==='dark'){document.documentElement.dataset.theme='dark';tbtn.textContent='☾ Night';}
+      else{delete document.documentElement.dataset.theme;tbtn.textContent='☀ Day';}
+    }
+    applyTheme(localStorage.getItem('execkee-theme')||'day');
+    tbtn.onclick=()=>{const next=document.documentElement.dataset.theme==='dark'?'day':'dark';localStorage.setItem('execkee-theme',next);applyTheme(next);};
 
     let es;
     function connect(){

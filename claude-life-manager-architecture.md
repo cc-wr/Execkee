@@ -487,3 +487,13 @@ Before any real cross-machine setup, run **both roles on the same machine** — 
 **B.4 The primary acts directly (amends §A.4 brief).** For Execkee operations *and* edits to the life-tasks task store (mark done, add, resolve), the primary acts immediately and confirms in one line — no propose-and-wait, no step narration, no command echoes. This is a deliberate, scoped override of the controller's global "propose before editing" rule, because that ceremony proved too heavy for a natural-language control surface. Destructive actions (close/unmanage) still confirm first.
 
 **B.5 The operator brief is system-managed and versioned.** The life-tasks `CLAUDE.md` carries a version marker (`execkee-brief vN`) and is regenerated when the version changes, so brief improvements propagate on controller restart. (The `/execkee` command file remains write-once.)
+
+---
+
+## Codicil C — Cycle scheduling divergences (recorded 2026-06-14)
+
+*Two ways the implemented 30-minute cycle diverges from the §4.9 / §1 framing. Recorded so the doc and code agree.*
+
+**C.1 The cycle is a `setInterval`, not a scheduled OS task or a Cowork agent (amends §1, §4.9).** §4.9 calls it a "scheduled Claude Cowork task." It is implemented as a plain Node `setInterval` inside the always-on controller **server** process (`src/server/index.js`, every `CYCLE_INTERVAL_MS`), which calls `runCoworkCycle` and shells out to **headless `claude -p`** for the actual LLM work — the per-instance report forks (`--resume … --fork-session`) and the cycle synthesis. Nothing stays resident between cycles except the Node server; each cycle spawns short-lived `claude` processes and exits. The *behavior* (the 30-minute loop that authors the cycle report + sentences and refreshes the dashboard) matches the spec; only the *vehicle* differs. The same `runCoworkCycle` is also invoked on demand (`POST /api/run-cycle`) and automatically right after a successful adopt (§B.2). It still routes instance reports through the server/hub, consistent with "the scheduled task does not talk to workhorses directly" (§the link).
+
+**C.2 The cycle is alive only while the controller runs; it is wall-clock-relative and not boot-persistent (B1).** It fires 30 minutes after server start (not aligned to clock half-hours), and it stops when the controller is stopped — there is no OS-level schedule that survives a reboot or logout. This is the B1 "supervised-while-running" decision. True scheduling — boot/Task-Scheduler persistence, clock alignment, and robust day-rollover handling across downtime — is deferred to Phase 1.

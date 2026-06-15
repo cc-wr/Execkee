@@ -177,7 +177,7 @@ async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports
     // task-based report so an overdue/failed item still surfaces a sentence.
     if (!parsed || (!parsed.summary && !(parsed.sentences || []).length)) {
       console.error('[cowork] Synthesis empty/unparseable — using fallback report');
-      return buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueTodayTasks, failedInstances });
+      return buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueTodayTasks, failedInstances, dailyTasks });
     }
 
     return {
@@ -190,18 +190,21 @@ async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports
         priority: s.priority || i + 1,
         source: 'cycle-report',
       })),
-      presumedTasks: (parsed.presumedTasks || []).map((t, i) => ({
-        id: t.id || `presumed-${i}`,
-        instance: t.instance || '',
-        text: t.text,
-        due: t.due || null,
-        urgency: t.urgency || 'normal',
-      })).filter(t => t.text),
+      presumedTasks: dedupePresumedTasks(
+        (parsed.presumedTasks || []).map((t, i) => ({
+          id: t.id || `presumed-${i}`,
+          instance: t.instance || '',
+          text: t.text,
+          due: t.due || null,
+          urgency: t.urgency || 'normal',
+        })).filter(t => t.text),
+        dailyTasks.tasks
+      ),
       rawThinking: parsed.thinking || '',
     };
   } catch (err) {
     console.error('[cowork] Claude synthesis failed:', err.message);
-    return buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueTodayTasks, failedInstances });
+    return buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueTodayTasks, failedInstances, dailyTasks });
   }
 }
 
@@ -301,7 +304,7 @@ function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incom
   ].join('\n');
 }
 
-function buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueTodayTasks, failedInstances }) {
+function buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueTodayTasks, failedInstances, dailyTasks }) {
   const sentences = [];
   let priority = 1;
 
@@ -333,14 +336,15 @@ function buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueToda
   }
 
   // Deterministic presumed tasks: every NEEDS ATTENTION / BLOCKED item from each
-  // instance report (no dedup against the task list, but better than nothing).
-  const presumedTasks = [];
+  // instance report, deduped against the task list (and each other).
+  let presumedTasks = [];
   for (const r of instanceReports) {
     const rep = r.report || {};
     for (const x of [...(rep.needsAttention || []), ...(rep.blocked || [])]) {
       presumedTasks.push({ id: `presumed-${presumedTasks.length}`, instance: r.name, text: x, due: null, urgency: 'normal' });
     }
   }
+  presumedTasks = dedupePresumedTasks(presumedTasks, dailyTasks && dailyTasks.tasks);
 
   return {
     timestamp: cycleTime,
@@ -350,6 +354,21 @@ function buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueToda
     presumedTasks,
     rawThinking: '',
   };
+}
+
+// Drop presumed tasks that duplicate an existing task (or each other). Exact
+// normalized match (trim + lowercase + collapse whitespace) — conservative, so
+// it never hides a legitimately distinct item.
+function dedupePresumedTasks(presumed, tasks) {
+  const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const existing = new Set((tasks || []).map(t => norm(t.text)));
+  const seen = new Set();
+  return (presumed || []).filter(p => {
+    const k = norm(p.text);
+    if (!k || existing.has(k) || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 function collectFlaggedEvents(tracking) {
