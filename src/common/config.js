@@ -45,7 +45,7 @@ export default Object.freeze({
   // first: it is fast and summarizes fine; sonnet can time out on large sessions.
   REPORT_FALLBACK_MODELS: ['haiku', 'sonnet'],
   REPORT_TIMEOUT_MS: 180_000,
-  HEARTBEAT_INTERVAL_MS: 30_000,
+  HEARTBEAT_INTERVAL_MS: Number(process.env.EXECKEE_HEARTBEAT_MS) || 30_000,
   RECONNECT_INTERVAL_MS: 5000,
 
   WINDOW_TITLE_PREFIX: 'Execkee',

@@ -70,6 +70,7 @@ export class Hub {
           }
 
           case MSG.PONG:
+            ws._lastPong = Date.now();
             break;
 
           default:
@@ -306,12 +307,18 @@ export class Hub {
   }
 
   _startHeartbeat(ws) {
+    ws._lastPong = Date.now();
     const interval = setInterval(() => {
-      if (ws.readyState === 1) {
-        ws.send(makeMessage(MSG.PING));
-      } else {
+      if (ws.readyState !== 1) { clearInterval(interval); return; }
+      // A clean ws 'close' isn't guaranteed on a crash or network partition, so
+      // also drop a connection that has gone silent for ~3 heartbeat intervals.
+      if (Date.now() - (ws._lastPong || 0) > config.HEARTBEAT_INTERVAL_MS * 3) {
+        console.log('[hub] Workhorse heartbeat timed out — terminating stale connection');
+        try { ws.terminate(); } catch {}
         clearInterval(interval);
+        return;
       }
+      ws.send(makeMessage(MSG.PING));
     }, config.HEARTBEAT_INTERVAL_MS);
     ws.on('close', () => clearInterval(interval));
   }
