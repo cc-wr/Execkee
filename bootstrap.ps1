@@ -1,7 +1,7 @@
 # Execkee bootstrap - set up the whole system on a fresh Windows machine.
 #
-# Installs Node.js (portable - no admin, no winget), installs Claude Code,
-# downloads Execkee (zip - no git needed), runs npm install, and launches.
+# Installs Node.js and Git (portable - no admin, no winget), installs Claude
+# Code, clones Execkee (a git working copy), runs npm install, and launches.
 #
 # CONTROLLER (default) - on the main machine:
 #   irm https://raw.githubusercontent.com/cc-wr/Execkee/master/bootstrap.ps1 | iex
@@ -28,6 +28,10 @@ function Info($m) { Write-Host "[execkee-setup] $m" -ForegroundColor Cyan }
 function Done($m) { Write-Host "[execkee-setup] $m" -ForegroundColor Green }
 function Die($m)  { Write-Error $m; exit 1 }
 
+# Portable Node/Git install here, OUTSIDE $InstallDir, so the cloned repo stays a
+# clean git working copy (no toolchain files showing up as untracked).
+$toolsDir = Join-Path $HOME '.execkee-tools'
+
 # --- 1. Node.js 18+ (portable zip: no admin, no winget) ---
 function Ensure-Node {
   if (Get-Command node -ErrorAction SilentlyContinue) {
@@ -37,7 +41,7 @@ function Ensure-Node {
   } else {
     Info "Node.js not found; installing a current LTS locally (no admin needed)."
   }
-  $nodeRoot = Join-Path $InstallDir 'node'
+  $nodeRoot = Join-Path $toolsDir 'node'
   New-Item -ItemType Directory -Force -Path $nodeRoot | Out-Null
   Info "Resolving latest Node LTS..."
   $lts = (Invoke-RestMethod 'https://nodejs.org/dist/index.json') | Where-Object { $_.lts } | Select-Object -First 1
@@ -85,24 +89,45 @@ function Ensure-Claude {
   Done "Claude Code logged in."
 }
 
-# --- 3. Download Execkee (zip: no git needed) ---
+# --- 3. Git for Windows (portable: no admin, no winget) ---
+function Ensure-Git {
+  if (Get-Command git -ErrorAction SilentlyContinue) { Info "Git present ($(git --version))."; return }
+  Info "Git not found; installing Git for Windows (portable, no admin)..."
+  $gitRoot = Join-Path $toolsDir 'git'
+  New-Item -ItemType Directory -Force -Path $gitRoot | Out-Null
+  $rel = Invoke-RestMethod 'https://api.github.com/repos/git-for-windows/git/releases/latest' -Headers @{ 'User-Agent' = 'Execkee-bootstrap' }
+  $asset = $rel.assets | Where-Object { $_.name -match '^PortableGit-.*-64-bit\.7z\.exe$' } | Select-Object -First 1
+  if (-not $asset) { Die "Could not find a 64-bit PortableGit asset in the latest Git for Windows release." }
+  $sfx = Join-Path $env:TEMP $asset.name
+  Info "Downloading $($asset.name)..."
+  Invoke-WebRequest $asset.browser_download_url -OutFile $sfx -UseBasicParsing
+  Info "Extracting portable Git to $gitRoot ..."
+  Start-Process -FilePath $sfx -ArgumentList '-y', ('-o"' + $gitRoot + '"') -Wait -NoNewWindow
+  Remove-Item $sfx -Force -ErrorAction SilentlyContinue
+  $gitCmd = Join-Path $gitRoot 'cmd'
+  $env:Path = "$gitCmd;$env:Path"
+  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+  if ($userPath -notlike "*$gitCmd*") {
+    [Environment]::SetEnvironmentVariable('Path', "$gitCmd;$userPath", 'User')
+  }
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Die "Git was extracted to $gitRoot but 'git' is not on PATH. Open a NEW terminal and re-run this script."
+  }
+  Done "Git for Windows installed ($(git --version))."
+}
+
+# --- 4. Clone Execkee (a git working copy you can fix, commit, and push from) ---
 function Ensure-Repo {
   if ($RepoOwner -eq 'REPLACE_ME') {
     Die "RepoOwner is not set. Edit bootstrap.ps1 (set `$RepoOwner) or pass -RepoOwner <github-user>."
   }
+  if (Test-Path (Join-Path $InstallDir '.git')) { Info "Execkee already cloned at $InstallDir."; return }
   if (Test-Path (Join-Path $InstallDir 'package.json')) { Info "Execkee already present at $InstallDir."; return }
-  $zipUrl = "https://github.com/$RepoOwner/$RepoName/archive/refs/heads/$Branch.zip"
-  $zip = Join-Path $env:TEMP "execkee-$Branch.zip"
-  $tmp = Join-Path $env:TEMP 'execkee-extract'
-  Info "Downloading Execkee from $zipUrl ..."
-  Invoke-WebRequest $zipUrl -OutFile $zip -UseBasicParsing
-  Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-  Expand-Archive -Path $zip -DestinationPath $tmp -Force
-  $extracted = Get-ChildItem $tmp -Directory | Select-Object -First 1
-  New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-  Copy-Item -Path (Join-Path $extracted.FullName '*') -Destination $InstallDir -Recurse -Force
-  Remove-Item $zip, $tmp -Recurse -Force -ErrorAction SilentlyContinue
-  Done "Execkee downloaded to $InstallDir."
+  $repoUrl = "https://github.com/$RepoOwner/$RepoName.git"
+  Info "Cloning Execkee from $repoUrl (branch $Branch)..."
+  git clone --branch $Branch $repoUrl $InstallDir
+  if ($LASTEXITCODE -ne 0) { Die "git clone failed (exit $LASTEXITCODE)." }
+  Done "Execkee cloned to $InstallDir (git working copy - fix, commit, and push from here)."
 }
 
 # --- main ---
@@ -112,6 +137,7 @@ if ($Mode -eq 'workhorse' -and -not $ControllerAddress) {
 }
 Ensure-Node
 Ensure-Claude
+Ensure-Git
 Ensure-Repo
 Set-Location $InstallDir
 if (Test-Path (Join-Path $InstallDir 'package-lock.json')) {
@@ -123,7 +149,7 @@ if (Test-Path (Join-Path $InstallDir 'package-lock.json')) {
 }
 if ($LASTEXITCODE -ne 0) { Die "npm install failed (exit $LASTEXITCODE)." }
 # Let the local launcher .ps1 files run on future (day-2) starts: the default
-# client policy is Restricted, and zip-extracted files may carry a Mark-of-the-Web.
+# client policy is Restricted (clone files have no Mark-of-the-Web, but be safe).
 Get-ChildItem -Path $InstallDir -Recurse -Include *.ps1, *.psm1, *.psd1 -File | Unblock-File -ErrorAction SilentlyContinue
 $effPolicy = Get-ExecutionPolicy
 if ($effPolicy -in @('Restricted', 'AllSigned', 'Undefined')) {
