@@ -75,9 +75,12 @@ function superviseNode(name, args, extraEnv) {
 
 // --- The primary Claude Code surface (a visible window in life-tasks) ---
 
-// Pre-grant the primary file access to the relevant dirs + the node CLI, and
-// auto-accept edits, so the user is never prompted to approve. (Bash beyond
-// node still prompts — deliberate.) Created once; never clobbers user edits.
+// The primary is the user's trusted, autonomous control surface: it's launched with
+// --dangerously-skip-permissions (see launchPrimaryWindow) so it never prompts to
+// approve the node CLI commands / edits it runs on their behalf — a single allow rule
+// couldn't cover the compound `node … && … | …` forms it builds, which kept prompting.
+// Built-in guards for rm -rf / and ~ still prompt. These settings additionally
+// pre-grant data-dir access. Created once; never clobbers user edits.
 let primarySettingsWritten = false;
 function ensurePrimarySettings() {
   if (!primarySettingsWritten && !existsSync(PRIMARY_SETTINGS)) {
@@ -123,7 +126,7 @@ function launchPrimaryWindow() {
   // Pass the whole arg line as ONE PowerShell string with each value
   // double-quoted, so the multi-word seed prompt reaches claude intact
   // (an -ArgumentList @(...) array splits space-containing elements).
-  const argLine = `--settings "${settings}" "${PRIMARY_SEED}"`;
+  const argLine = `--dangerously-skip-permissions --settings "${settings}" "${PRIMARY_SEED}"`;
   const psArgLine = argLine.replace(/'/g, "''");
   const psCmd = `$p = Start-Process claude -WorkingDirectory '${cwd}' -ArgumentList '${psArgLine}' -PassThru; Write-Output $p.Id`;
   try {
