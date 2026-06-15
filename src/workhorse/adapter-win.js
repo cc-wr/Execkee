@@ -51,7 +51,8 @@ param(
     [string]$Handle = "0",
     [string]$Cwd = ".",
     [string]$ArgString = "",
-    [string]$InstanceId = ""
+    [string]$InstanceId = "",
+    [string]$DataDir = ""
 )
 
 Add-Type @"
@@ -76,6 +77,10 @@ switch ($Action) {
         if ($InstanceId -and $InstanceId.Length -gt 0) {
             # Inherited by claude and by its hook child processes (§ in-instance control).
             $env:EXECKEE_INSTANCE_ID = $InstanceId
+        }
+        if ($DataDir -and $DataDir.Length -gt 0) {
+            # So the in-instance hook resolves the workhorse's OWN local mirror.
+            $env:EXECKEE_DATA_DIR = $DataDir
         }
         $sp = @{ FilePath = 'claude'; PassThru = $true; WorkingDirectory = $Cwd }
         if ($ArgString -and $ArgString.Trim().Length -gt 0) {
@@ -178,7 +183,7 @@ function doLaunch(instanceId, claudeArgs, projectPath) {
   const cwd = projectPath || process.cwd();
   const settings = ensureInstanceSettings();
   const argString = [...claudeArgs, '--settings', settings].join(' ');
-  const out = runHelper({ Action: 'launch', Cwd: cwd, ArgString: argString, InstanceId: instanceId });
+  const out = runHelper({ Action: 'launch', Cwd: cwd, ArgString: argString, InstanceId: instanceId, DataDir: config.DATA_DIR });
   const [pidStr, handleStr] = out.split(/\s+/);
   const pid = parseInt(pidStr, 10) || null;
   const windowHandle = handleStr && handleStr !== '0' ? handleStr : null;

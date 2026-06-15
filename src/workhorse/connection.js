@@ -3,12 +3,14 @@ import { MSG, parseMessage, makeMessage } from '../common/protocol.js';
 import config from '../common/config.js';
 
 export class ServerConnection {
-  constructor({ serverUrl, workhorseId, workhorseName, os, onCommand }) {
+  constructor({ serverUrl, workhorseId, workhorseName, os, onCommand, onSync, onSettings }) {
     this.serverUrl = serverUrl;
     this.workhorseId = workhorseId;
     this.workhorseName = workhorseName;
     this.os = os;
     this.onCommand = onCommand || (() => {});
+    this.onSync = onSync || (() => {});
+    this.onSettings = onSettings || (() => {});
     this.ws = null;
     this.connected = false;
     this.reconnectTimer = null;
@@ -28,6 +30,12 @@ export class ServerConnection {
         name: this.workhorseName,
         os: this.os,
       }));
+      // Ask the controller for our authoritative roster (works on first connect
+      // AND reconnect — we never read the controller's disk).
+      this.ws.send(makeMessage(MSG.SYNC_REQUEST, {
+        workhorseId: this.workhorseId,
+        reason: 'startup',
+      }));
     });
 
     this.ws.on('message', (raw) => {
@@ -38,8 +46,12 @@ export class ServerConnection {
         case MSG.COMMAND:
           this._handleCommand(msg);
           break;
+        case MSG.SYNC:
+          console.log(`[connection] Received SYNC: ${(msg.instances || []).length} instance(s)`);
+          this.onSync(msg.instances || [], msg.mode);
+          break;
         case MSG.SETTINGS_PUSH:
-          console.log('[connection] Received settings push');
+          this.onSettings(msg);
           break;
         case MSG.PING:
           this.ws.send(makeMessage(MSG.PONG));

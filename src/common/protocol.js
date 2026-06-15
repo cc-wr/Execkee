@@ -5,6 +5,8 @@ export const MSG = Object.freeze({
   EVENT: 'event',
   COMMAND: 'command',
   SETTINGS_PUSH: 'settings-push',
+  SYNC: 'sync',                 // controller → workhorse: authoritative record roster
+  SYNC_REQUEST: 'sync-request', // workhorse → controller: send me my roster (on (re)connect)
   ACK: 'ack',
   PING: 'ping',
   PONG: 'pong',
@@ -31,6 +33,16 @@ export const VISIBILITY = Object.freeze({
   FOREGROUND: 'foreground',
   HIDDEN: 'hidden',
 });
+
+// desiredState only advances toward a terminal state (never resurrect a
+// closed/failed instance). Used by both the controller merge and the workhorse
+// sync-apply so the two sides can't disagree on the rule.
+const _DRANK = { alive: 0, closing: 1, closed: 2, failed: 2 };
+export function maxDesiredState(a, b) {
+  if (!b) return a;
+  if (!a) return b;
+  return (_DRANK[b] ?? 0) > (_DRANK[a] ?? 0) ? b : a;
+}
 
 let _reqCounter = 0;
 

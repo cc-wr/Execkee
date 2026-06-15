@@ -37,6 +37,7 @@ const connection = new ServerConnection({
   workhorseId,
   workhorseName,
   os: platform(),
+  onSync: (records) => instanceManager.applySync(records),
   onCommand: async (msg) => {
     console.log(`[workhorse] Command: ${msg.command} for ${msg.instanceId || 'N/A'}`);
 
@@ -79,7 +80,8 @@ const connection = new ServerConnection({
 });
 
 connection.connect();
-instanceManager.startAll();
+// Roster + startup now come from the controller via MSG.SYNC (onSync ->
+// applySync -> startAll), not from a shared disk. No immediate local startAll.
 
 const stateInterval = setInterval(() => {
   const state = instanceManager.getLocalState();

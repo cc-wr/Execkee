@@ -1,5 +1,5 @@
 import { readTracking, writeTracking, createInstanceRecord, addInstance, updateInstance, getInstancesForWorkhorse } from '../common/tracking.js';
-import { DESIRED_STATE, VISIBILITY } from '../common/protocol.js';
+import { DESIRED_STATE, VISIBILITY, maxDesiredState } from '../common/protocol.js';
 import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd } from './reporter.js';
 import * as adapter from './adapter-win.js';
 import config from '../common/config.js';
@@ -9,6 +9,30 @@ export class InstanceManager {
     this.workhorseId = workhorseId;
     this.onEvent = onEvent || (() => {});
     this.monitors = new Map();
+  }
+
+  // Apply the controller's authoritative roster (MSG.SYNC) into the local mirror,
+  // then (re)start. Controller-owned fields come from the sync; workhorse-owned
+  // runtime fields (pid/windowHandle/watermark/reports) are preserved on existing
+  // records. desiredState only advances toward terminal. Then startAll launches/
+  // monitors — stale pids are handled there (dead → relaunch, alive → just monitor).
+  applySync(records) {
+    const tracking = readTracking();
+    for (const r of (records || [])) {
+      if (!r.id) continue;
+      const cur = tracking.instances[r.id];
+      if (!cur) {
+        tracking.instances[r.id] = { ...r };
+      } else {
+        if (r.name) cur.name = r.name;
+        if (r.sessionId) cur.sessionId = r.sessionId;
+        if (r.workhorseId) cur.workhorseId = r.workhorseId;
+        if (r.projectPath) cur.projectPath = r.projectPath;
+        cur.desiredState = maxDesiredState(cur.desiredState, r.desiredState);
+      }
+    }
+    writeTracking(tracking);
+    this.startAll();
   }
 
   startAll() {
@@ -218,13 +242,27 @@ export class InstanceManager {
   getLocalState() {
     const tracking = readTracking();
     const instances = getInstancesForWorkhorse(tracking, this.workhorseId);
+    // Full workhorse-owned field set, so the controller can fold this into its
+    // master tracking (§2.2/§2.3). Controller-owned fields (id/name/sessionId/
+    // workhorseId/createdAt) are echoed but the controller trusts its own.
     return instances.map(inst => ({
       id: inst.id,
       name: inst.name,
       sessionId: inst.sessionId,
+      workhorseId: inst.workhorseId,
+      projectPath: inst.projectPath,
       desiredState: inst.desiredState,
       visibility: inst.visibility,
+      externallyHeld: inst.externallyHeld,
+      pid: inst.pid,
+      windowHandle: inst.windowHandle,
+      crashCount: inst.crashCount,
       heldBySubcontroller: inst.heldBySubcontroller,
+      watermark: inst.watermark,
+      lastReportTime: inst.lastReportTime,
+      lastReportContent: inst.lastReportContent,
+      reportFailureCount: inst.reportFailureCount,
+      lastReportError: inst.lastReportError,
       processAlive: adapter.isProcessAlive(inst.pid),
       lastActivityTime: inst.lastActivityTime,
     }));

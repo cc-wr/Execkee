@@ -4,7 +4,10 @@ import { existsSync, mkdirSync } from 'fs';
 
 const HOME = homedir();
 const CLAUDE_DIR = join(HOME, '.claude');
-const DATA_DIR = join(HOME, '.execkee');
+// Data dir is overridable so a workhorse can keep its OWN local mirror separate
+// from the controller's master — both on a real 2nd machine (its own ~/.execkee)
+// and for same-box simulation/co-located workhorse (EXECKEE_DATA_DIR=...).
+const DATA_DIR = process.env.EXECKEE_DATA_DIR || join(HOME, '.execkee');
 const SHARED_STORE_DIR = join(DATA_DIR, 'shared-store');
 const LIFE_TASKS_DIR = join(DATA_DIR, 'life-tasks');
 

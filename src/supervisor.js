@@ -47,7 +47,7 @@ function pidAlive(pid) {
 
 // --- Supervise a Node child (server / subcontroller) with backoff ---
 
-function superviseNode(name, args) {
+function superviseNode(name, args, extraEnv) {
   const rec = { name, proc: null };
   nodeChildren.push(rec);
   let backoff = 1000;
@@ -57,7 +57,8 @@ function superviseNode(name, args) {
     if (shuttingDown) return;
     startedAt = Date.now();
     log(name, `starting`);
-    const proc = spawn('node', args, { cwd: ROOT, stdio: 'inherit' });
+    const env = extraEnv ? { ...process.env, ...extraEnv } : process.env;
+    const proc = spawn('node', args, { cwd: ROOT, stdio: 'inherit', env });
     rec.proc = proc;
     proc.on('exit', (code) => {
       if (shuttingDown) return;
@@ -265,7 +266,11 @@ function startController() {
   log('controller', `root: ${ROOT}`);
   superviseNode('server', ['src/server/index.js']);
   setTimeout(() => {
-    superviseNode('workhorse', ['src/workhorse/index.js', `ws://localhost:${config.WS_PORT}`, 'wh-local', hostname()]);
+    // D1: the co-located workhorse gets its OWN data dir (a local mirror), so
+    // loopback behaves exactly like a remote machine — no shared-file aliasing
+    // with the controller's master tracking.
+    superviseNode('workhorse', ['src/workhorse/index.js', `ws://localhost:${config.WS_PORT}`, 'wh-local', hostname()],
+      { EXECKEE_DATA_DIR: join(config.DATA_DIR, 'wh-local') });
   }, 2500);
   setTimeout(() => {
     startPrimary();

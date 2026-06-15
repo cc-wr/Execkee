@@ -1,8 +1,15 @@
 import { WebSocketServer } from 'ws';
-import { MSG, CMD, parseMessage, makeMessage } from '../common/protocol.js';
-import { readTracking, writeTracking, registerWorkhorse, getInstancesForWorkhorse } from '../common/tracking.js';
+import { MSG, CMD, parseMessage, makeMessage, maxDesiredState } from '../common/protocol.js';
+import { readTracking, writeTracking, registerWorkhorse, getInstancesForWorkhorse, createInstanceRecord } from '../common/tracking.js';
 import { writeState } from '../common/store.js';
 import config from '../common/config.js';
+
+// Fields a workhorse is the source of truth for — folded from STATE_UPDATE into
+// the controller's master tracking (§2.3). Controller-owned identity fields
+// (id/name/sessionId/workhorseId/createdAt) are never overwritten from the wire.
+const WH_OWNED = ['pid', 'windowHandle', 'visibility', 'externallyHeld', 'crashCount',
+  'heldBySubcontroller', 'watermark', 'lastReportTime', 'lastReportContent',
+  'reportFailureCount', 'lastReportError', 'lastActivityTime'];
 
 export class Hub {
   constructor({ port, onDashboardUpdate }) {
@@ -35,6 +42,10 @@ export class Hub {
 
           case MSG.STATE_UPDATE:
             this._handleStateUpdate(msg);
+            break;
+
+          case MSG.SYNC_REQUEST:
+            this._sendSync(msg.workhorseId || workhorseId);
             break;
 
           case MSG.REPORT_RESULT:
@@ -118,6 +129,18 @@ export class Hub {
     };
   }
 
+  // Push a workhorse its authoritative roster (its own instances) from the
+  // master tracking, so it can resume/launch them without reading our disk.
+  _sendSync(workhorseId) {
+    if (!workhorseId) return;
+    const ws = this.connections.get(workhorseId);
+    if (!ws || ws.readyState !== 1) return;
+    const tracking = readTracking();
+    const instances = getInstancesForWorkhorse(tracking, workhorseId);
+    ws.send(makeMessage(MSG.SYNC, { mode: 'full', instances }));
+    console.log(`[hub] Sent SYNC to ${workhorseId}: ${instances.length} instance(s)`);
+  }
+
   _handleRegister(msg) {
     const tracking = readTracking();
     registerWorkhorse(tracking, {
@@ -151,6 +174,36 @@ export class Hub {
       wh.instances[inst.id] = inst;
     }
     this._persistState();
+
+    // Fold the reported state into the MASTER tracking file (§2.3) so the cowork
+    // cycle, dashboard, and CLI see instances on remote workhorses without a
+    // shared filesystem. Single-writer-per-fact: workhorse-owned fields overwrite;
+    // identity fields are kept; desiredState only advances toward terminal.
+    const tracking = readTracking();
+    let changed = false;
+    for (const r of (msg.instances || [])) {
+      if (!r.id) continue;
+      let cur = tracking.instances[r.id];
+      if (!cur) {
+        // New instance created on the workhorse — adopt it into the master.
+        cur = createInstanceRecord({
+          id: r.id,
+          workhorseId: msg.workhorseId,
+          name: r.name,
+          projectPath: r.projectPath,
+          sessionId: r.sessionId,
+          visibility: r.visibility,
+        });
+        tracking.instances[r.id] = cur;
+      }
+      for (const f of WH_OWNED) {
+        if (r[f] !== undefined) cur[f] = r[f];
+      }
+      if (r.projectPath && r.projectPath !== cur.projectPath) cur.projectPath = r.projectPath;
+      cur.desiredState = maxDesiredState(cur.desiredState, r.desiredState);
+      changed = true;
+    }
+    if (changed) writeTracking(tracking);
   }
 
   _handleReportResult(msg) {
