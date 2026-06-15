@@ -6,408 +6,265 @@
   <title>Execkee</title>
   <style>
     :root {
-      --bg: #0d1117;
-      --surface: #161b22;
-      --border: #30363d;
-      --text: #e6edf3;
-      --text-muted: #8b949e;
-      --accent: #58a6ff;
-      --green: #3fb950;
-      --yellow: #d29922;
-      --red: #f85149;
-      --orange: #db6d28;
+      --bg: #0a0e14;
+      --surface: #141a23;
+      --surface2: #1c2531;
+      --border: #2b3645;
+      --text: #eef3f8;
+      --muted: #8b9bb0;
+      --blue: #4aa3ff;
+      --green: #3fd17a;
+      --amber: #f0a830;
+      --red: #ff5d52;
+      --gray: #3a4658;
     }
-
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
+    html, body { height: 100%; }
     body {
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-      line-height: 1.5;
-      padding: 24px;
-      max-width: 900px;
-      margin: 0 auto;
+      padding: 2vmin 2.5vmin;
+      display: flex;
+      flex-direction: column;
+      gap: 2vmin;
+      min-height: 100vh;
     }
 
-    header {
+    /* --- Status strip --- */
+    .strip {
       display: flex;
+      align-items: center;
       justify-content: space-between;
-      align-items: baseline;
-      margin-bottom: 32px;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 16px;
+      gap: 2vmin;
     }
+    .brand { font-size: 3.2vmin; font-weight: 800; letter-spacing: 0.06em; }
+    .indicators { display: flex; align-items: center; gap: 2.4vmin; font-size: 1.9vmin; font-weight: 600; }
+    .ind { display: flex; align-items: center; gap: 0.8vmin; color: var(--muted); }
+    .dot { width: 1.6vmin; height: 1.6vmin; border-radius: 50%; background: var(--gray); flex-shrink: 0; }
+    .dot.green { background: var(--green); box-shadow: 0 0 1.2vmin var(--green); }
+    .dot.red { background: var(--red); box-shadow: 0 0 1.2vmin var(--red); }
+    .dot.amber { background: var(--amber); }
+    .dot.blue { background: var(--blue); }
 
-    header h1 {
-      font-size: 20px;
-      font-weight: 600;
-      letter-spacing: -0.02em;
-    }
-
-    #connection-status {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    #connection-status.connected { color: var(--green); }
-    #connection-status.disconnected { color: var(--red); }
-
-    /* --- The Sentence --- */
-    #sentence-box {
+    /* --- The sentence (focal point) --- */
+    .sentence {
+      flex: 0 0 auto;
       background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 24px;
-      margin-bottom: 32px;
-      min-height: 80px;
+      border: 0.4vmin solid var(--border);
+      border-left-width: 1.4vmin;
+      border-radius: 1.4vmin;
+      padding: 3.5vmin 4vmin;
       display: flex;
       align-items: center;
+      gap: 2.5vmin;
+      min-height: 22vmin;
     }
+    .sentence.red { border-color: var(--red); background: linear-gradient(90deg, rgba(255,93,82,0.12), var(--surface) 40%); }
+    .sentence.amber { border-color: var(--amber); background: linear-gradient(90deg, rgba(240,168,48,0.12), var(--surface) 40%); }
+    .sentence.blue { border-color: var(--blue); background: linear-gradient(90deg, rgba(74,163,255,0.10), var(--surface) 40%); }
+    .sentence.standby { border-color: var(--border); border-left-color: var(--gray); }
+    .s-icon { font-size: 7vmin; line-height: 1; flex-shrink: 0; }
+    .s-body { flex: 1; }
+    .s-text { font-size: 4vmin; font-weight: 700; line-height: 1.25; }
+    .sentence.standby .s-text { color: var(--muted); font-weight: 500; }
+    .s-id { margin-top: 1.2vmin; font-size: 1.6vmin; color: var(--muted); letter-spacing: 0.04em; }
 
-    #sentence-box.standby {
-      border-color: var(--border);
-    }
-
-    #sentence-box.active {
-      border-color: var(--accent);
-      border-width: 2px;
-    }
-
-    #sentence-text {
-      font-size: 18px;
-      font-weight: 500;
-      line-height: 1.4;
-    }
-
-    #sentence-text.standby {
-      color: var(--text-muted);
-      font-style: italic;
-    }
-
-    /* --- Sections --- */
-    section {
-      margin-bottom: 28px;
-    }
-
-    section h2 {
-      font-size: 14px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      margin-bottom: 12px;
-    }
-
-    /* --- Tasks --- */
-    .task-list {
-      list-style: none;
-    }
-
-    .task-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 14px;
-    }
-
-    .task-item:hover {
+    /* --- Lower grid --- */
+    .grid { flex: 1; display: grid; grid-template-columns: 1.1fr 1fr; gap: 2vmin; min-height: 0; }
+    .panel {
       background: var(--surface);
+      border: 0.3vmin solid var(--border);
+      border-radius: 1.2vmin;
+      padding: 2.2vmin 2.4vmin;
+      display: flex;
+      flex-direction: column;
+      gap: 1.6vmin;
+      overflow: auto;
     }
+    .col { display: flex; flex-direction: column; gap: 2vmin; min-height: 0; }
+    h2 { font-size: 1.7vmin; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
 
-    .task-check {
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      border: 2px solid var(--border);
-      flex-shrink: 0;
+    /* --- Donut --- */
+    .tasks-head { display: flex; align-items: center; gap: 3vmin; }
+    .donut-wrap { position: relative; width: 18vmin; height: 18vmin; flex-shrink: 0; }
+    .donut { width: 100%; height: 100%; border-radius: 50%;
+      background: conic-gradient(var(--green) 0 0deg, var(--blue) 0deg 0deg, var(--gray) 0deg 360deg); }
+    .donut::after {
+      content: ''; position: absolute; inset: 22%;
+      background: var(--surface); border-radius: 50%;
     }
+    .donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .donut-center .pct { font-size: 4.5vmin; font-weight: 800; }
+    .donut-center .lbl { font-size: 1.4vmin; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .legend { display: flex; flex-direction: column; gap: 1.3vmin; font-size: 2.1vmin; font-weight: 600; }
+    .legend .li { display: flex; align-items: center; gap: 1.2vmin; }
+    .legend .sw { width: 1.8vmin; height: 1.8vmin; border-radius: 0.4vmin; }
+    .legend .n { font-size: 2.6vmin; font-weight: 800; min-width: 1.6vmin; text-align: right; }
 
-    .task-item.complete .task-check {
-      background: var(--green);
-      border-color: var(--green);
-    }
-
-    .task-item.complete .task-text {
-      text-decoration: line-through;
-      color: var(--text-muted);
-    }
-
-    .task-status {
-      font-size: 11px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-weight: 600;
-      flex-shrink: 0;
-    }
-
-    .task-status.overdue {
-      background: rgba(248, 81, 73, 0.15);
-      color: var(--red);
-    }
-
-    .task-status.due-today {
-      background: rgba(210, 153, 34, 0.15);
-      color: var(--yellow);
-    }
-
-    .task-status.high {
-      background: rgba(219, 109, 40, 0.15);
-      color: var(--orange);
-    }
-
-    .task-text {
-      flex: 1;
-    }
-
-    .task-due {
-      font-size: 12px;
-      color: var(--text-muted);
-      flex-shrink: 0;
-    }
+    /* --- Task chips --- */
+    .tlist { display: flex; flex-direction: column; gap: 1vmin; }
+    .titem { display: flex; align-items: center; gap: 1.4vmin; font-size: 2.1vmin; padding: 0.6vmin 0; }
+    .check { width: 2.2vmin; height: 2.2vmin; border-radius: 50%; border: 0.35vmin solid var(--gray); flex-shrink: 0; }
+    .titem.complete .check { background: var(--green); border-color: var(--green); }
+    .titem.inprogress .check { border-color: var(--blue); background: radial-gradient(var(--blue) 40%, transparent 42%); }
+    .titem.complete .ttext { text-decoration: line-through; color: var(--muted); }
+    .ttext { flex: 1; }
+    .chip { font-size: 1.4vmin; font-weight: 800; padding: 0.4vmin 1vmin; border-radius: 0.6vmin; text-transform: uppercase; letter-spacing: 0.05em; }
+    .chip.overdue { background: rgba(255,93,82,0.2); color: var(--red); }
+    .chip.due-today { background: rgba(240,168,48,0.2); color: var(--amber); }
+    .chip.inprogress { background: rgba(74,163,255,0.2); color: var(--blue); }
 
     /* --- Instances --- */
-    .instance-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-      gap: 12px;
-    }
+    .inst { display: flex; align-items: center; gap: 1.4vmin; font-size: 2vmin; padding: 0.5vmin 0; }
+    .inst .meta { color: var(--muted); font-size: 1.5vmin; margin-left: auto; }
 
-    .instance-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px;
-    }
+    /* --- Presumed tasks --- */
+    .pitem { display: flex; align-items: flex-start; gap: 1.2vmin; font-size: 1.9vmin; padding: 0.7vmin 0; border-bottom: 0.2vmin solid var(--surface2); }
+    .pitem .pbullet { color: var(--blue); font-size: 2vmin; line-height: 1.2; }
+    .pitem .ptext { flex: 1; }
+    .pitem .psrc { display: block; font-size: 1.4vmin; color: var(--muted); margin-top: 0.3vmin; }
+    .pdue { font-size: 1.5vmin; font-weight: 700; color: var(--amber); white-space: nowrap; }
 
-    .instance-name {
-      font-size: 14px;
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-
-    .instance-meta {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    .instance-vis {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      margin-right: 4px;
-    }
-
-    .instance-vis.foreground { background: var(--green); }
-    .instance-vis.hidden { background: var(--text-muted); }
-
-    /* --- Flagged Events --- */
-    .event-item {
-      background: rgba(248, 81, 73, 0.1);
-      border: 1px solid rgba(248, 81, 73, 0.3);
-      border-radius: 6px;
-      padding: 10px 14px;
-      margin-bottom: 8px;
-      font-size: 13px;
-    }
-
-    /* --- Footer --- */
-    footer {
-      margin-top: 40px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border);
-      font-size: 12px;
-      color: var(--text-muted);
-      display: flex;
-      justify-content: space-between;
-    }
-
-    .empty-state {
-      color: var(--text-muted);
-      font-size: 13px;
-      font-style: italic;
-      padding: 8px 0;
-    }
+    .flag { background: rgba(255,93,82,0.12); border: 0.2vmin solid rgba(255,93,82,0.4); border-radius: 0.8vmin; padding: 1vmin 1.4vmin; font-size: 1.8vmin; color: #ffd2ce; }
+    .empty { color: var(--muted); font-size: 1.7vmin; font-style: italic; }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Execkee</h1>
-    <span id="connection-status" class="disconnected">disconnected</span>
-  </header>
-
-  <div id="sentence-box" class="standby">
-    <span id="sentence-text" class="standby">Stand by.</span>
+  <div class="strip">
+    <div class="brand">EXECKEE</div>
+    <div class="indicators">
+      <span class="ind" id="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">connecting</span></span>
+      <span class="ind"><span class="dot blue"></span><span id="inst-count">0 instances</span></span>
+      <span class="ind"><span class="dot" id="cycle-dot"></span><span id="cycle-text">no cycle yet</span></span>
+    </div>
   </div>
 
-  <section id="tasks-section">
-    <h2>Today's Tasks</h2>
-    <ul id="task-list" class="task-list">
-      <li class="empty-state">No tasks for today.</li>
-    </ul>
-  </section>
-
-  <section id="instances-section">
-    <h2>Instances</h2>
-    <div id="instance-grid" class="instance-grid">
-      <div class="empty-state">No managed instances.</div>
+  <div class="sentence standby" id="sentence">
+    <div class="s-icon" id="s-icon">○</div>
+    <div class="s-body">
+      <div class="s-text" id="s-text">Stand by.</div>
+      <div class="s-id" id="s-id"></div>
     </div>
-  </section>
+  </div>
 
-  <section id="events-section" style="display: none;">
-    <h2>Flagged Events</h2>
-    <div id="events-list"></div>
-  </section>
+  <div class="grid">
+    <div class="panel">
+      <h2>Your Tasks</h2>
+      <div class="tasks-head">
+        <div class="donut-wrap">
+          <div class="donut" id="donut"></div>
+          <div class="donut-center"><div class="pct" id="donut-pct">0%</div><div class="lbl">done</div></div>
+        </div>
+        <div class="legend">
+          <div class="li"><span class="sw" style="background:var(--green)"></span><span class="n" id="lg-done">0</span><span>completed</span></div>
+          <div class="li"><span class="sw" style="background:var(--blue)"></span><span class="n" id="lg-prog">0</span><span>in progress</span></div>
+          <div class="li"><span class="sw" style="background:var(--gray)"></span><span class="n" id="lg-todo">0</span><span>not done</span></div>
+        </div>
+      </div>
+      <div class="tlist" id="tlist"></div>
+    </div>
 
-  <footer>
-    <span id="last-cycle">No cycle data yet</span>
-    <span id="last-update">—</span>
-  </footer>
+    <div class="col">
+      <div class="panel" style="flex:0 0 auto;">
+        <h2>Instances</h2>
+        <div id="ilist"></div>
+      </div>
+      <div class="panel" style="flex:1;">
+        <h2>From your instances <span style="color:var(--muted);font-weight:600">· not on your list</span></h2>
+        <div id="plist"></div>
+      </div>
+      <div class="panel" id="flags-panel" style="flex:0 0 auto; display:none;">
+        <h2>Flags</h2>
+        <div id="flist"></div>
+      </div>
+    </div>
+  </div>
 
   <script>
-    let evtSource = null;
+    function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+    function timeAgo(d){const s=Math.floor((Date.now()-d.getTime())/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
 
-    function connectSSE() {
-      const status = document.getElementById('connection-status');
-      evtSource = new EventSource('/api/events');
-
-      evtSource.onopen = () => {
-        status.textContent = 'connected';
-        status.className = 'connected';
-      };
-
-      evtSource.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          render(data);
-        } catch {}
-      };
-
-      evtSource.onerror = () => {
-        status.textContent = 'disconnected';
-        status.className = 'disconnected';
-        evtSource.close();
-        setTimeout(connectSSE, 3000);
-      };
+    function urgencyOf(data){
+      if(data.standby||!data.sentence)return'standby';
+      const s=((data.sentence.id||'')+' '+(data.sentence.text||'')).toLowerCase();
+      if(/urgent|overdue|today|deadline|missed|asap|immediately/.test(s))return'red';
+      if(/due|soon|tonight|tomorrow/.test(s))return'amber';
+      return'blue';
     }
 
-    function render(data) {
-      renderSentence(data);
-      renderTasks(data.dailyTasks || []);
-      renderInstances(data.instanceStatus || []);
-      renderEvents(data.flaggedEvents || []);
-      renderFooter(data);
-    }
+    function render(data){
+      // sentence
+      const box=document.getElementById('sentence'), txt=document.getElementById('s-text'), icon=document.getElementById('s-icon'), id=document.getElementById('s-id');
+      const u=urgencyOf(data);
+      box.className='sentence '+u;
+      if(data.standby||!data.sentence){txt.textContent='Stand by.';icon.textContent='○';id.textContent='';}
+      else{txt.textContent=data.sentence.text;icon.textContent=u==='red'?'⚠':(u==='amber'?'⏰':'➤');id.textContent='#'+(data.sentence.id||'');}
 
-    function renderSentence(data) {
-      const box = document.getElementById('sentence-box');
-      const text = document.getElementById('sentence-text');
+      // donut + legend
+      const tasks=data.dailyTasks||[];
+      const done=tasks.filter(t=>t.complete).length;
+      const prog=tasks.filter(t=>!t.complete&&t.inProgress).length;
+      const todo=tasks.length-done-prog;
+      const total=tasks.length||1;
+      const dDeg=done/total*360, pDeg=(done+prog)/total*360;
+      document.getElementById('donut').style.background=
+        `conic-gradient(var(--green) 0 ${dDeg}deg, var(--blue) ${dDeg}deg ${pDeg}deg, var(--gray) ${pDeg}deg 360deg)`;
+      document.getElementById('donut-pct').textContent=Math.round(done/total*100)+'%';
+      document.getElementById('lg-done').textContent=done;
+      document.getElementById('lg-prog').textContent=prog;
+      document.getElementById('lg-todo').textContent=todo;
 
-      if (data.standby || !data.sentence) {
-        box.className = 'standby';
-        text.className = 'standby';
-        text.textContent = 'Stand by.';
-      } else {
-        box.className = 'active';
-        text.className = '';
-        text.textContent = data.sentence.text;
-      }
-    }
-
-    function renderTasks(tasks) {
-      const list = document.getElementById('task-list');
-      if (!tasks.length) {
-        list.innerHTML = '<li class="empty-state">No tasks for today.</li>';
-        return;
-      }
-
-      list.innerHTML = tasks.map(t => {
-        const classes = ['task-item'];
-        if (t.complete) classes.push('complete');
-
-        let statusBadge = '';
-        if (t.status === 'overdue') {
-          statusBadge = '<span class="task-status overdue">overdue</span>';
-        } else if (t.status === 'due-today') {
-          statusBadge = '<span class="task-status due-today">today</span>';
-        } else if (t.priority === 'high' && !t.complete) {
-          statusBadge = '<span class="task-status high">high</span>';
+      // task list
+      document.getElementById('tlist').innerHTML = tasks.length ? tasks.map(t=>{
+        const cls=['titem']; if(t.complete)cls.push('complete'); else if(t.inProgress)cls.push('inprogress');
+        let chip='';
+        if(!t.complete){
+          if(t.status==='overdue')chip='<span class="chip overdue">overdue</span>';
+          else if(t.status==='due-today')chip='<span class="chip due-today">today</span>';
+          else if(t.inProgress)chip='<span class="chip inprogress">in progress</span>';
         }
+        return `<div class="${cls.join(' ')}"><span class="check"></span><span class="ttext">${esc(t.text)}</span>${chip}</div>`;
+      }).join('') : '<div class="empty">No tasks today.</div>';
 
-        const dueText = t.due ? `<span class="task-due">${t.due}</span>` : '';
+      // instances
+      const insts=data.instanceStatus||[];
+      document.getElementById('inst-count').textContent=insts.length+(insts.length===1?' instance':' instances');
+      document.getElementById('ilist').innerHTML = insts.length ? insts.map(i=>{
+        const cls=i.reportFailing?'red':(i.visibility==='foreground'?'green':'blue');
+        const ago=i.lastReport?('reported '+timeAgo(new Date(i.lastReport))):(i.reportFailing?'report failing':'no report yet');
+        return `<div class="inst"><span class="dot ${cls}"></span><span>${esc(i.name)}</span><span class="meta">${i.visibility} · ${ago}</span></div>`;
+      }).join('') : '<div class="empty">No managed instances.</div>';
 
-        return `<li class="${classes.join(' ')}">
-          <span class="task-check"></span>
-          <span class="task-text">${esc(t.text)}</span>
-          ${statusBadge}
-          ${dueText}
-        </li>`;
-      }).join('');
+      // presumed tasks (from instances, not on the primary list)
+      const pres=data.presumedTasks||[];
+      document.getElementById('plist').innerHTML = pres.length ? pres.map(p=>{
+        const due=p.due?`<span class="pdue">${esc(p.due)}</span>`:'';
+        const src=p.instance?`<span class="psrc">${esc(p.instance)}</span>`:'';
+        return `<div class="pitem"><span class="pbullet">▸</span><span class="ptext">${esc(p.text)}${src}</span>${due}</div>`;
+      }).join('') : '<div class="empty">Nothing surfaced from your instances.</div>';
+
+      // flags
+      const flags=data.flaggedEvents||[];
+      const fp=document.getElementById('flags-panel');
+      if(flags.length){fp.style.display='';document.getElementById('flist').innerHTML=flags.map(f=>`<div class="flag">${esc(f.name||f.instanceId)}: ${esc(f.type)}${f.error?(' — '+esc(String(f.error).slice(0,120))):''}</div>`).join('');}
+      else fp.style.display='none';
+
+      // cycle freshness
+      const cd=document.getElementById('cycle-dot'), ct=document.getElementById('cycle-text');
+      if(data.cycleTime){const mins=(Date.now()-new Date(data.cycleTime).getTime())/60000;cd.className='dot '+(mins<35?'green':'amber');ct.textContent='cycle '+timeAgo(new Date(data.cycleTime));}
+      else{cd.className='dot';ct.textContent='no cycle yet';}
     }
 
-    function renderInstances(instances) {
-      const grid = document.getElementById('instance-grid');
-      if (!instances.length) {
-        grid.innerHTML = '<div class="empty-state">No managed instances.</div>';
-        return;
-      }
-
-      grid.innerHTML = instances.map(i => {
-        const ago = i.lastActivity ? timeAgo(new Date(i.lastActivity)) : 'unknown';
-        return `<div class="instance-card">
-          <div class="instance-name">
-            <span class="instance-vis ${i.visibility}"></span>
-            ${esc(i.name)}
-          </div>
-          <div class="instance-meta">
-            ${i.workhorse} &middot; ${i.visibility} &middot; ${ago}
-          </div>
-        </div>`;
-      }).join('');
+    let es;
+    function connect(){
+      const dot=document.getElementById('conn-dot'), txt=document.getElementById('conn-text');
+      es=new EventSource('/api/events');
+      es.onopen=()=>{dot.className='dot green';txt.textContent='online';};
+      es.onmessage=e=>{try{render(JSON.parse(e.data));}catch{}};
+      es.onerror=()=>{dot.className='dot red';txt.textContent='offline';es.close();setTimeout(connect,3000);};
     }
-
-    function renderEvents(events) {
-      const section = document.getElementById('events-section');
-      const list = document.getElementById('events-list');
-
-      if (!events.length) {
-        section.style.display = 'none';
-        return;
-      }
-
-      section.style.display = '';
-      list.innerHTML = events.map(e =>
-        `<div class="event-item">${esc(e.name || e.instanceId)}: ${esc(e.type)} (crashes: ${e.crashCount || 0})</div>`
-      ).join('');
-    }
-
-    function renderFooter(data) {
-      document.getElementById('last-cycle').textContent = data.cycleTime
-        ? `Last cycle: ${new Date(data.cycleTime).toLocaleTimeString()}`
-        : 'No cycle data yet';
-      document.getElementById('last-update').textContent = data.updatedAt
-        ? `Updated: ${new Date(data.updatedAt).toLocaleTimeString()}`
-        : '—';
-    }
-
-    function timeAgo(date) {
-      const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-      if (seconds < 60) return 'just now';
-      if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-      if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-      return `${Math.floor(seconds / 86400)}d ago`;
-    }
-
-    function esc(s) {
-      const d = document.createElement('div');
-      d.textContent = s || '';
-      return d.innerHTML;
-    }
-
-    connectSSE();
+    connect();
   </script>
 </body>
 </html>

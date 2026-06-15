@@ -88,6 +88,7 @@ export async function runCoworkCycle(hub) {
       : null,
     standby: !sentenceQueue.major,
     dailyTasks: dailyTasks.tasks,
+    presumedTasks: cycleReport.presumedTasks || [],
     instanceStatus: instances
       .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
       .map(i => ({
@@ -97,6 +98,7 @@ export async function runCoworkCycle(hub) {
         visibility: i.visibility,
         lastActivity: i.lastActivityTime,
         lastReport: i.lastReportTime,
+        reportFailing: (i.reportFailureCount || 0) >= 2,
       })),
     flaggedEvents: collectFlaggedEvents(tracking),
     cycleTime,
@@ -135,6 +137,7 @@ function generateDailyTasks(lifeTasks, today) {
       priority: task.priority || 'normal',
       status,
       complete: !!task.completedAt,
+      inProgress: !!task.inProgress && !task.completedAt,
     };
   });
 
@@ -187,6 +190,13 @@ async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports
         priority: s.priority || i + 1,
         source: 'cycle-report',
       })),
+      presumedTasks: (parsed.presumedTasks || []).map((t, i) => ({
+        id: t.id || `presumed-${i}`,
+        instance: t.instance || '',
+        text: t.text,
+        due: t.due || null,
+        urgency: t.urgency || 'normal',
+      })).filter(t => t.text),
       rawThinking: parsed.thinking || '',
     };
   } catch (err) {
@@ -266,17 +276,25 @@ function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incom
     'You are the life-management cycle reporter. Synthesize the data below into a cycle report.',
     'Prioritize by urgency. Highest first: anything explicitly URGENT or with an imminent/missed-but-recoverable deadline (this INCLUDES "needs attention" items from instance reports, not just tasks), then overdue tasks, then due-today, then blocked work, then failed instances, then everything else.',
     'Instance-report action items are first-class: a report whose summary sounds "done" can still carry an urgent embedded deadline in its NEEDS ATTENTION list — surface that, do not bury it. Each pressing report item should get its own sentence.',
+    'Also extract "presumed tasks": concrete action items implied by the instance ' +
+    'reports (their NEEDS ATTENTION / BLOCKED / IN PROGRESS items) that are NOT already ' +
+    'represented in the user\'s task list above. These are things the user likely needs ' +
+    'to do, surfaced from their managed conversations, that they have not yet written ' +
+    'down as tasks. One entry per discrete action; do not duplicate an existing task; ' +
+    'keep the text short and actionable; include a due date only if the report states one.',
     'Output JSON:',
     '{',
     '  "summary": "one-paragraph synthesis",',
     '  "thinking": "your reasoning about priorities",',
     '  "sentences": [',
-    '    {"id": "unique-id", "text": "conversational sentence about the issue", "priority": 1},',
-    '    ...',
+    '    {"id": "unique-id", "text": "conversational sentence about the issue", "priority": 1}',
+    '  ],',
+    '  "presumedTasks": [',
+    '    {"id": "short-id", "instance": "instance name", "text": "short action item", "due": "YYYY-MM-DD or null", "urgency": "high|normal|low"}',
     '  ]',
     '}',
     'Sentences should be conversational — how a thoughtful person would flag the issue.',
-    'If nothing is pressing, return an empty sentences array.',
+    'If nothing is pressing, return an empty sentences array. If no off-list action items, return an empty presumedTasks array.',
     '',
     '--- DATA ---',
     sections.join('\n\n'),
@@ -314,11 +332,22 @@ function buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueToda
     });
   }
 
+  // Deterministic presumed tasks: every NEEDS ATTENTION / BLOCKED item from each
+  // instance report (no dedup against the task list, but better than nothing).
+  const presumedTasks = [];
+  for (const r of instanceReports) {
+    const rep = r.report || {};
+    for (const x of [...(rep.needsAttention || []), ...(rep.blocked || [])]) {
+      presumedTasks.push({ id: `presumed-${presumedTasks.length}`, instance: r.name, text: x, due: null, urgency: 'normal' });
+    }
+  }
+
   return {
     timestamp: cycleTime,
     summary: 'Fallback report (Claude synthesis unavailable).',
     instanceReports,
     sentences,
+    presumedTasks,
     rawThinking: '',
   };
 }

@@ -23,7 +23,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 2;
+const BRIEF_VERSION = 3;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -241,9 +241,12 @@ current findings and issue ids.
 ## The life-tasks list
 
 This folder is the living task store. On "done with the taxes" / "add: renew
-passport" / "the billing thing now blocks the launch", edit
-\`${config.LIFE_TASKS_FILE}\` directly (JSON: \`{ "tasks": [ { "id", "text", "due", "priority", "completedAt" } ] }\`).
-The cycle reads it to regenerate the daily list and sentences.
+passport" / "the billing thing now blocks the launch" / "I'm working on the
+launch checklist", edit \`${config.LIFE_TASKS_FILE}\` directly. Task JSON:
+\`{ "tasks": [ { "id", "text", "due", "priority", "completedAt", "inProgress" } ] }\`.
+Set \`completedAt\` when done; set \`inProgress: true\` when the user starts working
+on a task (the dashboard donut shows completed / in-progress / not-done).
+The cycle reads this to regenerate the daily list and sentences.
 `;
 }
 

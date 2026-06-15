@@ -24,6 +24,7 @@ export function readDashboardData() {
     sentence: null,
     standby: true,
     dailyTasks: [],
+    presumedTasks: [],
     instanceStatus: [],
     flaggedEvents: [],
     cycleTime: null,
