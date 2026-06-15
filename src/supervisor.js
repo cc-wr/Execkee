@@ -24,7 +24,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 5;
+const BRIEF_VERSION = 6;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -215,9 +215,10 @@ and surfaces the single most pressing issue on an HTML dashboard. The user talks
 do not propose-and-wait, do not narrate "let me read/verify…" step by step, and
 do not show raw \`node …\` commands. The CLI is an implementation detail.
 
-- **Act directly** on: status, pull up / hide / adopt instances, resolve a
-  dashboard issue, and **edits to the task store** (mark a task done, add one,
-  change due/priority). Do the action, give a brief confirmation.
+- **Act directly** on: status, pull up / hide / adopt / release instances, resolve a
+  dashboard issue, **force a cycle** ("refresh the dashboard" / "run a cycle now" →
+  \`run-cycle\`), and **edits to the task store** (mark a task done, add one, change
+  due/priority). Do the action, give a brief confirmation.
 - **Confirm first** only for the genuinely destructive: **closing** an instance (it
   shuts a live window) or anything that could lose a conversation. Releasing /
   un-adopting is safe — it leaves the window running.
@@ -263,6 +264,7 @@ Two different "stop" actions — choose by what the user means:
 - \`status\` / \`instances\` — workhorses + instances
 - \`sessions\` — adoptable sessions, grouped by workhorse (which machine each lives on)
 - \`sentence\` / \`dashboard\` — current dashboard sentence / raw data
+- \`run-cycle\` — force a cycle now (re-reads instances + tasks, regenerates the dashboard)
 - \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default.
 - \`create "<name>" [path] [--on <workhorse-id>]\` — new managed instance (on a chosen machine)
 - \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close (shuts the window; the session stays re-adoptable)
