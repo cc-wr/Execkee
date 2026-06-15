@@ -36,6 +36,15 @@ async function runCycle() {
 // Allow an on-demand cycle (POST /api/run-cycle) in addition to the timer.
 dashboard.onRunCycle = runCycle;
 
+// Cheap, fork-free refresh of the dashboard's task list from tasks.json
+// (POST /api/refresh-tasks) — the primary runs this after any task edit so the
+// change shows immediately rather than waiting for the next cycle.
+dashboard.onRefreshTasks = async () => {
+  const { refreshDashboardTasks } = await import('../cowork.js');
+  refreshDashboardTasks();
+  dashboard.pushUpdate();
+};
+
 function startCycleTimer() {
   setTimeout(() => {
     runCycle();

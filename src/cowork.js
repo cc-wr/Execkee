@@ -152,6 +152,20 @@ function generateDailyTasks(lifeTasks, today) {
   return { date: today, tasks };
 }
 
+// Cheap, fork-free dashboard refresh for task edits: re-read tasks.json and update
+// ONLY the dashboard's task list (donut + dailyTasks). No Claude synthesis, so a
+// task change shows immediately instead of waiting for the next 30-min cycle.
+export function refreshDashboardTasks() {
+  const today = new Date().toISOString().split('T')[0];
+  const dailyTasks = generateDailyTasks(readLifeTasks(), today);
+  writeDailyTasks(dailyTasks);
+  const data = readDashboardData();
+  data.dailyTasks = dailyTasks.tasks;
+  data.updatedBy = 'task-refresh';
+  writeDashboardData(data);
+  return dailyTasks.tasks.length;
+}
+
 async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports, resolutions, previousQueue, tracking }) {
   const overdueTasks = dailyTasks.tasks.filter(t => t.status === 'overdue');
   const dueTodayTasks = dailyTasks.tasks.filter(t => t.status === 'due-today');

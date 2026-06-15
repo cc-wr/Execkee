@@ -18,6 +18,7 @@ export class DashboardServer {
     this.server = null;
     this.sseClients = new Set();
     this.onRunCycle = null; // set by index.js; runs a cycle on demand
+    this.onRefreshTasks = null; // set by index.js; cheap dashboard task refresh
   }
 
   start() {
@@ -72,6 +73,10 @@ export class DashboardServer {
 
     if (url.pathname === '/api/run-cycle' && req.method === 'POST') {
       return this._handleApiRunCycle(req, res);
+    }
+
+    if (url.pathname === '/api/refresh-tasks' && req.method === 'POST') {
+      return this._handleApiRefreshTasks(req, res);
     }
 
     if (url.pathname === '/' || url.pathname === '/index.html') {
@@ -195,6 +200,22 @@ export class DashboardServer {
     }
     try {
       await this.onRunCycle();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  async _handleApiRefreshTasks(req, res) {
+    if (!this.onRefreshTasks) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'No task-refresh wired' }));
+      return;
+    }
+    try {
+      await this.onRefreshTasks();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true }));
     } catch (err) {

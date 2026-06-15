@@ -301,6 +301,12 @@ switch (cmd) {
     break;
   }
 
+  case 'refresh-tasks': {
+    const result = await api('/api/refresh-tasks', 'POST', {});
+    console.log(result.success !== false ? 'Dashboard task list refreshed.' : `Failed: ${result.error}`);
+    break;
+  }
+
   case 'sessions': {
     // Adoptable sessions live on EACH workhorse (its own ~/.claude/projects);
     // the controller aggregates them and tags which are already managed.
@@ -339,6 +345,7 @@ switch (cmd) {
     console.log('  unmanage <instance-id>     Release / un-adopt an instance (leaves its window running)');
     console.log('  dashboard                  Show raw dashboard data');
     console.log('  run-cycle                  Force a cycle now (regenerate the dashboard)');
+    console.log('  refresh-tasks              Instantly refresh the dashboard task list from tasks.json (no cycle)');
     console.log('  sessions [--all]           Adoptable sessions per workhorse (--all incl. managed)');
     console.log('  issue add <text>           Log an Execkee improvement/bug to the backlog');
     console.log('  issue [all]                List open (or all) backlog issues');

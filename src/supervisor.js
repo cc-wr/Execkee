@@ -24,7 +24,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 6;
+const BRIEF_VERSION = 7;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -198,6 +198,13 @@ function ensureLifeTasksScaffold() {
     writeFileSync(execkeeCmd, execkeeCommand(), 'utf-8');
     log('primary', `wrote /execkee command: ${execkeeCmd}`);
   }
+
+  // Write-once: the primary maintains this log; never clobber the user's entries.
+  const trackingMd = join(dir, 'TRACKING.md');
+  if (!existsSync(trackingMd)) {
+    writeFileSync(trackingMd, trackingLogScaffold(), 'utf-8');
+    log('primary', `wrote tracking log scaffold: ${trackingMd}`);
+  }
 }
 
 function primaryOperatorBrief() {
@@ -265,6 +272,7 @@ Two different "stop" actions — choose by what the user means:
 - \`sessions\` — adoptable sessions, grouped by workhorse (which machine each lives on)
 - \`sentence\` / \`dashboard\` — current dashboard sentence / raw data
 - \`run-cycle\` — force a cycle now (re-reads instances + tasks, regenerates the dashboard)
+- \`refresh-tasks\` — instantly refresh the dashboard's task list after a task edit (cheap; no cycle)
 - \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default.
 - \`create "<name>" [path] [--on <workhorse-id>]\` — new managed instance (on a chosen machine)
 - \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close (shuts the window; the session stays re-adoptable)
@@ -291,7 +299,30 @@ launch checklist", edit \`${config.LIFE_TASKS_FILE}\` directly. Task JSON:
 \`{ "tasks": [ { "id", "text", "due", "priority", "completedAt", "inProgress" } ] }\`.
 Set \`completedAt\` when done; set \`inProgress: true\` when the user starts working
 on a task (the dashboard donut shows completed / in-progress / not-done).
-The cycle reads this to regenerate the daily list and sentences.
+
+**After EVERY task-store edit, immediately run \`refresh-tasks\`** so the dashboard
+reflects it at once — never make the user wait for the 30-minute cycle. (It just
+re-reads the tasks and updates the dashboard; no synthesis, instant.)
+
+**A "done" rarely lives in one place — reconcile across all three.** When the user
+says a task is complete (or gives a status change), don't treat the task list, the
+dashboard **sentence**, and the **instance / presumed tasks** as separate silos.
+After updating the task store and running \`refresh-tasks\`:
+- read the current sentence / \`${join(config.SHARED_STORE_DIR, 'cycle-report.json')}\`
+  and judge whether this completion **resolves the displayed issue** — if so, \`resolve\` it;
+- scan the **presumed tasks** (action items surfaced from managed instances) for the
+  same item — the thing the user finished is often one an instance flagged.
+
+## Keep a tracking log (TRACKING.md)
+
+Maintain \`${join(config.LIFE_TASKS_DIR, 'TRACKING.md')}\` as durable memory for
+everything the user tells you about the **sentence** and **instance tasks** that is
+NOT a direct task edit — so nothing is lost between cycles: **deferrals** ("push X to
+Friday", "not now"), **new information** ("the deadline moved", "they replied"), and
+**status / decisions** ("waiting on Bob", "dropping Y"). Append, newest at the bottom,
+each entry dated. **Before** resolving a sentence or surfacing a presumed task, check
+TRACKING.md first, so you never re-raise or contradict something the user already
+deferred or decided.
 `;
 }
 
@@ -301,6 +332,22 @@ function execkeeCommand() {
 Run \`node "${CLI}" status\` and \`node "${CLI}" sentence\`, summarize the current
 dashboard sentence and the managed instances for me, then wait for my instruction.
 Remember: only call \`resolve\` when my message actually resolves the displayed issue.
+`;
+}
+
+function trackingLogScaffold() {
+  return `# Execkee — Tracking Log
+
+You (the primary) maintain this file. Append everything the user tells you about the
+dashboard **sentence** and **instance tasks** that isn't a direct task-store edit, so
+nothing is lost between cycles: deferrals, new information, and status / decisions,
+plus context the user gives while reacting to the current sentence.
+
+Append-only, newest at the bottom, each entry dated (YYYY-MM-DD). Check here before
+resolving a sentence or surfacing a presumed task, so you don't re-raise or contradict
+something the user already deferred or decided.
+
+---
 `;
 }
 
