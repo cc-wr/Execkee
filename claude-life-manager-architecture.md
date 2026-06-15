@@ -497,3 +497,20 @@ Before any real cross-machine setup, run **both roles on the same machine** — 
 **C.1 The cycle is a `setInterval`, not a scheduled OS task or a Cowork agent (amends §1, §4.9).** §4.9 calls it a "scheduled Claude Cowork task." It is implemented as a plain Node `setInterval` inside the always-on controller **server** process (`src/server/index.js`, every `CYCLE_INTERVAL_MS`), which calls `runCoworkCycle` and shells out to **headless `claude -p`** for the actual LLM work — the per-instance report forks (`--resume … --fork-session`) and the cycle synthesis. Nothing stays resident between cycles except the Node server; each cycle spawns short-lived `claude` processes and exits. The *behavior* (the 30-minute loop that authors the cycle report + sentences and refreshes the dashboard) matches the spec; only the *vehicle* differs. The same `runCoworkCycle` is also invoked on demand (`POST /api/run-cycle`) and automatically right after a successful adopt (§B.2). It still routes instance reports through the server/hub, consistent with "the scheduled task does not talk to workhorses directly" (§the link).
 
 **C.2 The cycle is alive only while the controller runs; it is wall-clock-relative and not boot-persistent (B1).** It fires 30 minutes after server start (not aligned to clock half-hours), and it stops when the controller is stopped — there is no OS-level schedule that survives a reboot or logout. This is the B1 "supervised-while-running" decision. True scheduling — boot/Task-Scheduler persistence, clock alignment, and robust day-rollover handling across downtime — is deferred to Phase 1.
+
+---
+
+## Codicil D — Phase 2: external-source monitoring (planned, not built)
+
+*Scoped 2026-06-14 as Phase 2 work. Not implemented; recorded as the agreed direction.*
+
+**D.1 Goal.** Monitor the user's external message sources — **email and SMS** — for tasks, requests, and deadlines, and surface what they find on the dashboard so nothing actionable slips through.
+
+**D.2 Surface: a separate dashboard window per source.** Each source gets its own panel — e.g. **"From your email"** and **"From your SMS"** — alongside the existing **"From your instances"** presumed-tasks panel (§ the dashboard). Same shape: short action item + source (sender/subject or number) + due date when stated.
+
+**D.3 Mechanism (planned, reuses existing machinery).** Email is just another source of action items, so this extends the presumed-task pipeline rather than inventing a new one. Per source, a **headless scan step** in (or alongside) the 30-minute cycle pulls recent items via that source's connector — Gmail MCP (`mcp__claude_ai_Gmail__*`) for email; SMS connector **TBD** — and a `claude -p` pass extracts action items. Results are deduped with the existing `dedupePresumedTasks` helper (against the task list and each other) and written to the source's dashboard panel. A per-thread / per-conversation **watermark** (mirroring the §4.4 instance change-gate) avoids re-reading and re-surfacing handled items. Optionally each source may also have a **pull-up-able managed instance** (a "window") for acting on the items directly (reply, archive), with the passive scan doing the monitoring.
+
+**D.4 Open questions for Phase 2.**
+- **Auth in headless.** The Gmail MCP needs Google OAuth, and interactively-authenticated MCP servers can be absent in headless/cron runs — the riskiest unknown; resolve before relying on the scan. 
+- **SMS source.** No SMS connector is identified yet (candidates: a Twilio/webhook bridge, SMS-to-email forwarding, or a phone-side integration) — selecting one is part of Phase 2.
+- **Scope, cadence, privacy.** Which mail/messages to scan (unread / important / a dedicated label); how often (cost vs. freshness); and explicit acceptance that message content passes through the LLM each scan.
