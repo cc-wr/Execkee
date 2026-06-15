@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import config from './common/config.js';
+import { readTracking, writeTracking } from './common/tracking.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'src', 'cli.js');
@@ -286,15 +287,34 @@ Remember: only call \`resolve\` when my message actually resolves the displayed 
 
 // --- Wiring ---
 
+// Brain-only mode: drop any stale co-located workhorse (and its instances) from
+// the master tracking so a previously-run wh-local doesn't linger in status.
+function purgeLocalWorkhorse() {
+  try {
+    const tracking = readTracking();
+    let changed = false;
+    if (tracking.workhorses && tracking.workhorses['wh-local']) { delete tracking.workhorses['wh-local']; changed = true; }
+    for (const [iid, inst] of Object.entries(tracking.instances || {})) {
+      if (inst && inst.workhorseId === 'wh-local') { delete tracking.instances[iid]; changed = true; }
+    }
+    if (changed) { writeTracking(tracking); log('controller', 'purged stale co-located workhorse (wh-local) and its instances from tracking'); }
+  } catch (err) {
+    log('controller', `could not purge wh-local: ${err.message}`);
+  }
+}
+
 function startController() {
   log('controller', `root: ${ROOT}`);
+  // Brain-only by default: workers live on remote workhorse machines. Set
+  // EXECKEE_LOCAL_WORKHORSE=1 (or run with -WithLocalWorkhorse) to also run a
+  // co-located workhorse — the single-machine case.
+  const localWh = ['1', 'true', 'yes'].includes(String(process.env.EXECKEE_LOCAL_WORKHORSE || '').toLowerCase());
+  if (!localWh) {
+    log('controller', 'brain-only: no co-located workhorse (set EXECKEE_LOCAL_WORKHORSE=1 to enable one)');
+    purgeLocalWorkhorse();
+  }
   superviseNode('server', ['src/server/index.js']);
-  // The co-located workhorse is optional: set EXECKEE_NO_LOCAL_WORKHORSE=1 to run
-  // the controller brain-only, with workers living on remote machines.
-  const noLocalWh = ['1', 'true', 'yes'].includes(String(process.env.EXECKEE_NO_LOCAL_WORKHORSE || '').toLowerCase());
-  if (noLocalWh) {
-    log('controller', 'co-located workhorse disabled (EXECKEE_NO_LOCAL_WORKHORSE) — workers run on remote machines only');
-  } else {
+  if (localWh) {
     setTimeout(() => {
       // D1: the co-located workhorse gets its OWN data dir (a local mirror), so
       // loopback behaves exactly like a remote machine — no shared-file aliasing

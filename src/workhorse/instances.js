@@ -1,6 +1,6 @@
 import { readTracking, writeTracking, createInstanceRecord, addInstance, updateInstance, getInstancesForWorkhorse } from '../common/tracking.js';
 import { DESIRED_STATE, VISIBILITY, maxDesiredState } from '../common/protocol.js';
-import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd } from './reporter.js';
+import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd, resolveSessionId } from './reporter.js';
 import * as adapter from './adapter-win.js';
 import config from '../common/config.js';
 
@@ -81,10 +81,14 @@ export class InstanceManager {
   }
 
   manageExisting({ id, name, sessionId, projectPath, baseline, alreadyOpen }) {
-    // §4.6b step 1: verify the session exists on disk BEFORE adopting anything.
-    if (!getSessionJsonlPath(sessionId)) {
-      return { success: false, error: 'Session not found on disk' };
+    // §4.6b step 1: resolve a partial/short id to the full session id and verify
+    // it exists on disk BEFORE adopting (the full id is what `claude --resume`
+    // and the report fork require).
+    const resolvedId = resolveSessionId(sessionId);
+    if (!resolvedId) {
+      return { success: false, error: `Session not found on disk (or ambiguous prefix): ${sessionId}` };
     }
+    sessionId = resolvedId;
 
     // `claude --resume` is project-scoped: the instance MUST run from the
     // session's own working directory, not wherever the manage command was

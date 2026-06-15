@@ -36,6 +36,27 @@ export function getSessionJsonlPath(sessionId) {
   return null;
 }
 
+// Resolve a possibly-truncated session id to the full one. Exact match wins;
+// otherwise a unique prefix match across projects resolves (so a short id shown
+// in the `sessions` list still adopts). Returns null if missing or ambiguous.
+export function resolveSessionId(partial) {
+  if (!partial) return null;
+  if (getSessionJsonlPath(partial)) return partial;
+  const projectsDir = join(homedir(), '.claude', 'projects');
+  if (!existsSync(projectsDir)) return null;
+  const matches = new Set();
+  try {
+    for (const projectSlug of readdirSync(projectsDir)) {
+      let entries;
+      try { entries = readdirSync(join(projectsDir, projectSlug)); } catch { continue; }
+      for (const f of entries) {
+        if (f.endsWith('.jsonl') && f.startsWith(partial)) matches.add(f.slice(0, -6));
+      }
+    }
+  } catch {}
+  return matches.size === 1 ? [...matches][0] : null;
+}
+
 // Enumerate the Claude sessions on THIS machine that are adoptable (one per
 // transcript under ~/.claude/projects). Returns newest-first; the controller
 // aggregates these across workhorses and tags which are already managed.

@@ -21,7 +21,7 @@ param(
   [string] $RepoOwner = 'cc-wr',
   [string] $RepoName  = 'Execkee',
   [string] $Branch = 'master',
-  [switch] $NoLocalWorkhorse
+  [switch] $WithLocalWorkhorse
 )
 
 $ErrorActionPreference = 'Stop'
@@ -173,7 +173,7 @@ Write-Host ""
 $launcher = Join-Path $InstallDir "execkee-$Mode.ps1"
 if (-not (Test-Path $launcher)) { Die "Launcher $launcher not found in the downloaded repo." }
 if ($Mode -eq 'controller') {
-  if ($NoLocalWorkhorse) { & $launcher -NoLocalWorkhorse } else { & $launcher }
+  if ($WithLocalWorkhorse) { & $launcher -WithLocalWorkhorse } else { & $launcher }
 } else {
   & $launcher -ControllerAddress $ControllerAddress -Name $Name
 }

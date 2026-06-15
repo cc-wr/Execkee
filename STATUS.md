@@ -24,14 +24,14 @@ for the full design and its codicils.
 - **Phase 1 (multi-machine):**
   - ✅ Workhorse decoupled from shared filesystem — instance **state** syncs over the socket (`SYNC` / `STATE_UPDATE`, master tracking on the controller).
   - ✅ **Session discovery + adoption routing across machines** (this session): `sessions` is aggregated from every connected workhorse and **grouped by host**; `manage` auto-routes to the workhorse that owns the session (or `--on <workhorse-id>`); `create` takes `--on` to target a machine.
-  - ✅ Controller can run **brain-only** (`EXECKEE_NO_LOCAL_WORKHORSE` / `execkee-controller.ps1 -NoLocalWorkhorse`).
+  - ✅ Controller is **brain-only by default** (workers on remote machines); set `EXECKEE_LOCAL_WORKHORSE=1` / `-WithLocalWorkhorse` for a co-located workhorse (single-machine). Stale `wh-local` records are purged from tracking on brain-only startup.
   - ✅ Bootstrap installs a real **git clone** (committable) and installs Git for Windows portably if missing; on re-run it **auto-`git pull --ff-only`**.
   - ⏳ Pending: boot-persistence (survive reboot/logout), `.claude` settings sync, dead-workhorse heartbeat detection, primary resume-on-restart.
   - ⏭️ Deferred: heterogeneous OS (Linux/macOS workhorses).
 
 ## Operating quick-reference
 
-- **Controller (cscoo), brain-only:** `irm https://raw.githubusercontent.com/cc-wr/Execkee/master/bootstrap.ps1 | iex` then run `\.\execkee-controller.ps1 -NoLocalWorkhorse` (or bootstrap via the scriptblock form with `-NoLocalWorkhorse`). Leave the window open.
+- **Controller (cscoo):** `irm https://raw.githubusercontent.com/cc-wr/Execkee/master/bootstrap.ps1 | iex` then `\.\execkee-controller.ps1` (brain-only by default; add `-WithLocalWorkhorse` only for single-machine). Leave the window open.
 - **Workhorse (this machine):** `\.\execkee-workhorse.ps1 -ControllerAddress 100.79.227.109:7700 -Name "Workhorse-2"` from the dev repo.
 - **Talk to the primary** (on the controller) in natural language, or use the CLI there:
   - `node src/cli.js sessions [--all]` — adoptable sessions per workhorse
@@ -43,7 +43,8 @@ for the full design and its codicils.
 ## Known issues / future work
 
 - **KI-1 — managed-instance launch is broken (from `log8`).** On a workhorse, `create` (and adoption that must launch a window) records an instance but **never launches a real Claude window**: `Session: undefined`, and `hide`/`foreground` fail with "externally held or not launched". Created instances also never capture a `sessionId`, so they can't crash-recover. The `create → launch → capture sessionId` path needs a real fix. Removing the co-located workhorse sidesteps this on the controller, but it still affects remote workhorses. **Future.**
-- **KI-2 — `manage` routing not yet runtime-tested cross-machine.** The auto-route / `--on` logic is built on the verified `/api/sessions` aggregation and syntax-checked, but a real cross-machine adoption hasn't been exercised end-to-end yet.
+- **KI-2 — cross-machine adoption: id-resolution fixed; full path still to confirm.** A truncated session id (the primary adopting `de9066ff` instead of the full id) caused "Session not found on disk" even for a listed session. Adoption now resolves a unique prefix to the full id (`resolveSessionId`). A complete cross-machine adoption (launch + first report on a remote workhorse) still needs a live end-to-end run, and is gated by KI-1.
+- **KI-5 — closing the server doesn't close the primary surface (deferred).** Ctrl+C on the controller window triggers a shutdown that taskkills the primary, but killing only the server process (which the supervisor then restarts) leaves the primary open. Deferred — the server is slated to become a Windows service, which reshapes lifecycle/teardown anyway.
 - **KI-3 — no boot persistence.** Controller and workhorse live only while their window/process runs; surviving reboot/logout (service or scheduled task) is pending.
 - **KI-4 — resilience hardening pending.** Dead-workhorse heartbeat detection and primary resume-on-restart are not yet implemented.
 
