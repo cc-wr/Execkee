@@ -83,8 +83,14 @@ switch ($Action) {
             $env:EXECKEE_DATA_DIR = $DataDir
         }
         $sp = @{ FilePath = 'claude'; PassThru = $true; WorkingDirectory = $Cwd }
+        $argList = @()
         if ($ArgString -and $ArgString.Trim().Length -gt 0) {
-            $sp['ArgumentList'] = $ArgString.Split(' ')
+            # Drop empty tokens (e.g. from a missing value) so Start-Process never
+            # sees a null/empty element in ArgumentList.
+            $argList = @($ArgString.Split(' ') | Where-Object { $_ -and $_.Length -gt 0 })
+        }
+        if ($argList.Count -gt 0) {
+            $sp['ArgumentList'] = $argList
         }
         $p = Start-Process @sp
         $procId = $p.Id
@@ -191,6 +197,10 @@ function doLaunch(instanceId, claudeArgs, projectPath) {
 }
 
 export function launchInstance(instanceId, sessionId, projectPath) {
+  // A session-less instance (e.g. one created with no captured session) cannot be
+  // --resume'd; launch it as a fresh window rather than passing '--resume undefined',
+  // which builds a malformed ArgumentList and crash-loops (see KI-1).
+  if (!sessionId) return createNewInstance(instanceId, projectPath);
   const result = doLaunch(instanceId, ['--resume', sessionId], projectPath);
   console.log(`[adapter-win] Launched ${instanceId}: pid=${result.pid} hwnd=${result.windowHandle}`);
   return result;
