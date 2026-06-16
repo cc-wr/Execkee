@@ -247,12 +247,14 @@
         return `<div class="${cls.join(' ')}"><span class="check"></span><span class="ttext">${esc(t.text)}</span>${chip}</div>`;
       }).join('') : '<div class="empty">No tasks today.</div>';
 
-      // coverage: tracked-file tasks with no managed instance behind them
-      const cov=data.coverageTasks||[];
+      // coverage: tracked tasks with no instance, MINUS anything already shown in
+      // "Your Tasks" (matched by text, tentative included) so nothing repeats.
+      const dailyKeys=new Set((data.dailyTasks||[]).map(t=>(t.text||'').toLowerCase().trim()));
+      const cov=(data.coverageTasks||[]).filter(t=>!dailyKeys.has((t.text||'').toLowerCase().trim()));
       document.getElementById('covlist').innerHTML = cov.length ? cov.map(t=>{
         const tag=t.tentative?'<span class="chip tentative">tentative</span>':'';
         return `<div class="pitem"><span class="pbullet">▸</span><span class="ptext">${esc(t.text)}</span>${tag}</div>`;
-      }).join('') : '<div class="empty">Everything tracked is covered by an instance.</div>';
+      }).join('') : '<div class="empty">Nothing tracked outside your task list.</div>';
 
       // instance count (header indicator; the per-instance panel was removed)
       const insts=data.instanceStatus||[];
