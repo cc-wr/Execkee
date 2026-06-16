@@ -32,6 +32,8 @@ export default Object.freeze({
   // Today's plan: confirmed backlog items + tentative LLM guesses (reset daily).
   DAILY_PLAN_FILE: join(SHARED_STORE_DIR, 'daily-plan.json'),
   DAILY_PLAN_ARCHIVE_FILE: join(SHARED_STORE_DIR, 'daily-plan-archive.json'),
+  // Structured deferrals the cycle filters presumed tasks against (deterministic).
+  DEFERRALS_FILE: join(SHARED_STORE_DIR, 'deferrals.json'),
   RESOLUTIONS_FILE: join(SHARED_STORE_DIR, 'resolutions.json'),
   DASHBOARD_DATA_FILE: join(SHARED_STORE_DIR, 'dashboard-data.json'),
   LIFE_TASKS_FILE: join(LIFE_TASKS_DIR, 'tasks.json'),

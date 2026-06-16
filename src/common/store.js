@@ -97,6 +97,16 @@ export function writeDailyPlanArchive(data) {
   writeJson(config.DAILY_PLAN_ARCHIVE_FILE, data);
 }
 
+// --- Deferrals (topics the user has put on hold; the cycle suppresses related items) ---
+
+export function readDeferrals() {
+  return readJson(config.DEFERRALS_FILE, { deferrals: [] });
+}
+
+export function writeDeferrals(data) {
+  writeJson(config.DEFERRALS_FILE, data);
+}
+
 // --- Resolutions ---
 
 export function readResolutions() {

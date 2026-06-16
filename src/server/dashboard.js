@@ -22,6 +22,9 @@ export class DashboardServer {
     this.onApproveTask = null; // set by index.js; approve a tentative guess (or all)
     this.onRejectTask = null; // set by index.js; drop a tentative guess
     this.onRegenerateGuesses = null; // set by index.js; force a fresh tracked-file guess
+    this.onDefer = null; // set by index.js; add a structured deferral
+    this.onUndefer = null; // set by index.js; remove a deferral
+    this.onListDeferrals = null; // set by index.js; list active deferrals
   }
 
   start() {
@@ -92,6 +95,18 @@ export class DashboardServer {
 
     if (url.pathname === '/api/regenerate-guesses' && req.method === 'POST') {
       return this._handleApiRegenerateGuesses(req, res);
+    }
+
+    if (url.pathname === '/api/defer' && req.method === 'POST') {
+      return this._handleApiDefer(req, res);
+    }
+
+    if (url.pathname === '/api/undefer' && req.method === 'POST') {
+      return this._handleApiUndefer(req, res);
+    }
+
+    if (url.pathname === '/api/deferrals') {
+      return this._handleApiDeferrals(req, res);
     }
 
     if (url.pathname === '/' || url.pathname === '/index.html') {
@@ -288,6 +303,53 @@ export class DashboardServer {
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  async _handleApiDefer(req, res) {
+    const body = await this._readBody(req);
+    if (!this.onDefer) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'No defer wired' }));
+      return;
+    }
+    try {
+      const { topic, until } = JSON.parse(body || '{}');
+      const result = await this.onDefer({ topic, until: until || null });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  async _handleApiUndefer(req, res) {
+    const body = await this._readBody(req);
+    if (!this.onUndefer) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'No undefer wired' }));
+      return;
+    }
+    try {
+      const { id } = JSON.parse(body || '{}');
+      const result = await this.onUndefer(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  async _handleApiDeferrals(req, res) {
+    try {
+      const deferrals = this.onListDeferrals ? await this.onListDeferrals() : [];
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ deferrals }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ deferrals: [], error: err.message }));
     }
   }
 

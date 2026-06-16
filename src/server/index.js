@@ -61,6 +61,24 @@ dashboard.onRejectTask = async (id) => {
   return result;
 };
 
+// Structured deferrals: a deferred topic's related presumed tasks are suppressed.
+dashboard.onDefer = async ({ topic, until }) => {
+  const { addDeferral } = await import('../cowork.js');
+  const result = addDeferral(topic, until);
+  dashboard.pushUpdate();
+  return result;
+};
+dashboard.onUndefer = async (id) => {
+  const { removeDeferral } = await import('../cowork.js');
+  const result = removeDeferral(id);
+  dashboard.pushUpdate();
+  return result;
+};
+dashboard.onListDeferrals = async () => {
+  const { listDeferrals } = await import('../cowork.js');
+  return listDeferrals();
+};
+
 // Force a fresh tracked-file task guess now (doesn't wait for the daily rollover).
 dashboard.onRegenerateGuesses = async () => {
   const { regenerateGuesses } = await import('../cowork.js');

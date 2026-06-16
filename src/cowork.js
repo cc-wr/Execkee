@@ -9,6 +9,7 @@ import {
   readResolutions, writeResolutions,
   readDailyPlan, writeDailyPlan,
   readDailyPlanArchive, writeDailyPlanArchive,
+  readDeferrals, writeDeferrals,
 } from './common/store.js';
 import { DESIRED_STATE, VISIBILITY, CMD } from './common/protocol.js';
 import { readContextSources } from './common/context-sources.js';
@@ -78,6 +79,7 @@ export async function runCoworkCycle(hub) {
     previousQueue,
     tracking,
     contextSources,
+    deferrals: activeDeferrals(today),
   });
   writeCycleReport(cycleReport);
 
@@ -97,7 +99,7 @@ export async function runCoworkCycle(hub) {
     standby: !sentenceQueue.major,
     dailyTasks: planTodayItems(plan.items),
     coverageTasks: planHorizonCoverage(plan.items),
-    presumedTasks: cycleReport.presumedTasks || [],
+    presumedTasks: filterDeferredPresumed(cycleReport.presumedTasks || [], today),
     instanceStatus: instances
       .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
       .map(i => ({
@@ -368,6 +370,67 @@ export function refreshDashboardTasks() {
   return plan.items.length;
 }
 
+// ---- Deferrals: topics the user has put on hold; suppress related surfaced items ----
+
+// Deferrals still in effect today (no end date, or an end date that hasn't passed).
+function activeDeferrals(today) {
+  const { deferrals } = readDeferrals();
+  return (deferrals || []).filter(d => d && d.topic && (!d.until || d.until >= today));
+}
+
+// Does this text relate to a deferred topic? Substring, or all the topic's
+// significant words appearing in the text (same by-name discipline as matchInstance).
+function isDeferred(text, defs) {
+  const t = normText(text);
+  if (!t) return false;
+  for (const d of defs) {
+    const topic = normText(d.topic);
+    if (!topic) continue;
+    if (t.includes(topic)) return true;
+    const words = topic.split(' ').filter(w => w.length > 3);
+    if (words.length && words.every(w => t.includes(w))) return true;
+  }
+  return false;
+}
+
+// Drop presumed tasks that relate to an active deferral. Applied to BOTH the LLM and
+// fallback presumed-task sets, so a deferred topic's items leave the panel for sure.
+function filterDeferredPresumed(presumed, today) {
+  const defs = activeDeferrals(today);
+  if (!defs.length) return presumed || [];
+  return (presumed || []).filter(p => !isDeferred(p.text, defs));
+}
+
+export function addDeferral(topic, until) {
+  topic = String(topic || '').trim();
+  if (!topic) return { success: false, error: 'empty topic' };
+  const data = readDeferrals();
+  data.deferrals = data.deferrals || [];
+  const id = `def-${Date.now().toString(36)}`;
+  data.deferrals.push({ id, topic, until: until || null, createdAt: new Date().toISOString() });
+  writeDeferrals(data);
+  // Drop now-deferred presumed tasks from the dashboard immediately (don't wait a cycle).
+  const today = localDateStr();
+  const dash = readDashboardData();
+  dash.presumedTasks = filterDeferredPresumed(dash.presumedTasks, today);
+  writeDashboardData(dash);
+  return { success: true, id, topic, until: until || null };
+}
+
+export function removeDeferral(idOrTopic) {
+  const key = normText(idOrTopic);
+  const data = readDeferrals();
+  const before = (data.deferrals || []).length;
+  data.deferrals = (data.deferrals || []).filter(d => d.id !== idOrTopic && normText(d.topic) !== key);
+  writeDeferrals(data);
+  // Removed items reappear on the next cycle (we don't have them to restore now).
+  return { success: data.deferrals.length < before };
+}
+
+export function listDeferrals() {
+  return readDeferrals().deferrals || [];
+}
+
 // Force a fresh tentative-task guess from the tracked files NOW, without waiting for
 // the daily (midnight) rollover. Runs the LLM guesser and replaces the day's guesses;
 // does NOT archive (it's still the same day). Used by the `regenerate-guesses`
@@ -382,7 +445,7 @@ export async function regenerateGuesses() {
   return { success: true, guesses: plan.items.filter(i => i.source === 'guess').length };
 }
 
-async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports, resolutions, previousQueue, tracking, contextSources }) {
+async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports, resolutions, previousQueue, tracking, contextSources, deferrals }) {
   const overdueTasks = dailyTasks.tasks.filter(t => t.status === 'overdue');
   const dueTodayTasks = dailyTasks.tasks.filter(t => t.status === 'due-today');
   const incompleteTasks = dailyTasks.tasks.filter(t => !t.complete);
@@ -398,6 +461,7 @@ async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports
     failedInstances,
     recentResolutions: resolutions.log.slice(-10),
     contextSources,
+    deferrals,
   });
 
   try {
@@ -462,7 +526,7 @@ function parseSynthesis(output) {
   return null;
 }
 
-function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incompleteTasks, instanceReports, failedInstances, recentResolutions, contextSources }) {
+function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incompleteTasks, instanceReports, failedInstances, recentResolutions, contextSources, deferrals }) {
   const sections = [];
 
   sections.push(`Current time: ${cycleTime}. Today: ${today}.`);
@@ -504,6 +568,13 @@ function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incom
   }
   if (recentResolutions.length > 0) {
     sections.push(`RECENTLY RESOLVED:\n${recentResolutions.map(r => `- ${r.issueId}: ${r.message}`).join('\n')}`);
+  }
+  if (Array.isArray(deferrals) && deferrals.length) {
+    sections.push(
+      'DEFERRED TOPICS (binding — the user has put these on hold; do NOT surface them ' +
+      'or related items as sentences OR presumed tasks, until any stated date):\n' +
+      deferrals.map(d => `- ${d.topic}${d.until ? ` (until ${d.until})` : ''}`).join('\n')
+    );
   }
   if (contextSources && contextSources.trim()) {
     sections.push(`ADDITIONAL CONTEXT (the user's tracking log + configured source files):\n${contextSources}`);

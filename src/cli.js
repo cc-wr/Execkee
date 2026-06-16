@@ -356,6 +356,34 @@ switch (cmd) {
     break;
   }
 
+  case 'defer': {
+    // defer <topic words...> [--until YYYY-MM-DD] — suppress related surfaced items.
+    const ui = args.indexOf('--until');
+    let until = null, topicArgs = args;
+    if (ui >= 0) { until = args[ui + 1] || null; topicArgs = args.slice(0, ui).concat(args.slice(ui + 2)); }
+    const topic = topicArgs.join(' ').trim();
+    if (!topic) { console.log('Usage: defer "<topic>" [--until YYYY-MM-DD]'); break; }
+    const result = await api('/api/defer', 'POST', { topic, until });
+    console.log(result.success !== false ? `Deferred "${topic}"${until ? ` until ${until}` : ''}.` : `Failed: ${result.error}`);
+    break;
+  }
+
+  case 'undefer': {
+    const id = args.join(' ').trim();
+    if (!id) { console.log('Usage: undefer <id|topic>'); break; }
+    const result = await api('/api/undefer', 'POST', { id });
+    console.log(result.success !== false ? 'Deferral removed (related items return next cycle).' : `Failed: ${result.error}`);
+    break;
+  }
+
+  case 'deferrals': {
+    const result = await api('/api/deferrals');
+    const list = result.deferrals || [];
+    if (!list.length) { console.log('(no deferrals)'); break; }
+    for (const d of list) console.log(`  ${d.id}  ${d.topic}${d.until ? `  (until ${d.until})` : ''}`);
+    break;
+  }
+
   case 'sessions': {
     // Adoptable sessions live on EACH workhorse (its own ~/.claude/projects);
     // the controller aggregates them and tags which are already managed.
@@ -399,6 +427,9 @@ switch (cmd) {
     console.log('  approve-task <id> | --all  Approve a tentative guessed task (promotes it to the backlog)');
     console.log('  reject-task <id>           Drop a tentative guessed task');
     console.log('  regenerate-guesses         Force a fresh tracked-file task guess now (no wait for the daily rollover)');
+    console.log('  defer "<topic>" [--until YYYY-MM-DD]  Put a topic on hold — its instance-surfaced tasks stop appearing');
+    console.log('  undefer <id|topic>         Lift a deferral (items return next cycle)');
+    console.log('  deferrals                  List active deferrals');
     console.log('  sessions [--all]           Adoptable sessions per workhorse (--all incl. managed)');
     console.log('  issue add <text>           Log an Execkee improvement/bug to the backlog');
     console.log('  issue [all]                List open (or all) backlog issues');

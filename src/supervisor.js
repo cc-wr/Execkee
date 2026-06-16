@@ -26,7 +26,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 12;
+const BRIEF_VERSION = 13;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -388,6 +388,9 @@ Two different "stop" actions — choose by what the user means:
 - \`approve-task <id>\` / \`approve-task --all\` — approve a tentative guessed task (promotes it into the backlog)
 - \`reject-task <id>\` — drop a tentative guessed task
 - \`regenerate-guesses\` — force a fresh tracked-file task guess now (don't wait for the daily rollover). Run this whenever the user asks to **re-guess / regenerate / re-do the guessed tasks** (e.g. after they update a tracked doc). Takes a moment (it re-reads the tracked files and re-asks the model); it replaces today's tentative guesses, leaving confirmed/approved tasks untouched.
+- \`defer "<topic>" [--until YYYY-MM-DD]\` — put a topic on hold; the cycle then suppresses its related **instance-surfaced (presumed) tasks** and sentences (until the date, if given)
+- \`undefer <id|topic>\` — lift a deferral (related items return next cycle)
+- \`deferrals\` — list active deferrals
 - \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open] [--full-permissions]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default. \`--full-permissions\` runs it unattended (skips approval prompts).
 - \`create "<name>" [path] [--on <workhorse-id>]\` — new managed instance (on a chosen machine)
 - \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close (shuts the window; the session stays re-adoptable)
@@ -457,16 +460,33 @@ After updating the task store and running \`refresh-tasks\`:
   it's done and won't keep re-surfacing it. If a doc can't be edited directly, record
   the completion in TRACKING.md so the next cycle's guess accounts for it.
 
+## Deferring a topic (where deferrals go)
+
+When the user puts a topic **on hold** — "push the launch to Friday", "not now",
+"don't bug me about the visa", "drop Y", "later" — record it with the structured
+command, NOT just a prose note:
+
+\`\`\`
+node "${CLI}" defer "<short topic>" [--until YYYY-MM-DD]
+\`\`\`
+
+This is the **enforced** deferral store: the cycle deterministically suppresses that
+topic's related **instance-surfaced (presumed) tasks** and sentences from the dashboard
+(until the date, if you give one). A prose line in TRACKING.md alone is only *interpreted*
+and can slip through — so **always run \`defer\` for an actual hold**, and also jot the
+context in TRACKING.md if it's useful. To bring a topic back: \`undefer <id|topic>\`
+(\`deferrals\` lists what's active). Keep the topic phrase close to how it appears in the
+surfaced items so the match catches them.
+
 ## Keep a tracking log (TRACKING.md)
 
 Maintain \`${join(config.LIFE_TASKS_DIR, 'TRACKING.md')}\` as durable memory for
 everything the user tells you about the **sentence** and **instance tasks** that is
-NOT a direct task edit — so nothing is lost between cycles: **deferrals** ("push X to
-Friday", "not now"), **new information** ("the deadline moved", "they replied"), and
-**status / decisions** ("waiting on Bob", "dropping Y"). Append, newest at the bottom,
-each entry dated. **Before** resolving a sentence or surfacing a presumed task, check
-TRACKING.md first, so you never re-raise or contradict something the user already
-deferred or decided.
+NOT a direct task edit and not a hold — so nothing is lost between cycles: **new
+information** ("the deadline moved", "they replied") and **status / decisions**
+("waiting on Bob", "dropping Y"). Append, newest at the bottom, each entry dated.
+**Before** resolving a sentence or surfacing a presumed task, check TRACKING.md and
+the active \`deferrals\`, so you never re-raise something the user already set aside.
 
 **Extra context files.** The cycle also reads any files listed in
 \`${config.CONTEXT_SOURCES_FILE}\` (e.g. a Word doc of life tasks). When the user says
