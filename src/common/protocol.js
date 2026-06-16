@@ -5,7 +5,8 @@ export const MSG = Object.freeze({
   SESSIONS_RESULT: 'sessions-result', // workhorse → controller: its adoptable sessions
   EVENT: 'event',
   COMMAND: 'command',
-  SETTINGS_PUSH: 'settings-push',
+  SETTINGS_PUSH: 'settings-push',     // controller → node: apply this settings file
+  SETTINGS_REPORT: 'settings-report', // node → controller: my settings file changed
   SYNC: 'sync',                 // controller → workhorse: authoritative record roster
   SYNC_REQUEST: 'sync-request', // workhorse → controller: send me my roster (on (re)connect)
   ACK: 'ack',

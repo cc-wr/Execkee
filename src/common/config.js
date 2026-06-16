@@ -52,5 +52,11 @@ export default Object.freeze({
   HEARTBEAT_INTERVAL_MS: Number(process.env.EXECKEE_HEARTBEAT_MS) || 30_000,
   RECONNECT_INTERVAL_MS: 5000,
 
+  // Bidirectional Claude-settings sync (settings-sync.js). On by default; set
+  // EXECKEE_SETTINGS_SYNC=0 to disable. Canonical store lives on the controller.
+  SETTINGS_SYNC_ENABLED: process.env.EXECKEE_SETTINGS_SYNC !== '0',
+  SETTINGS_SYNC_POLL_MS: Number(process.env.EXECKEE_SETTINGS_POLL_MS) || 3000,
+  SETTINGS_SYNC_FILE: join(SHARED_STORE_DIR, 'settings-sync.json'),
+
   WINDOW_TITLE_PREFIX: 'Execkee',
 });

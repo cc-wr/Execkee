@@ -1,6 +1,7 @@
 import config from '../common/config.js';
 import { Hub } from './hub.js';
 import { DashboardServer } from './dashboard.js';
+import { snapshotLocal, applyIncoming, readSynced, startWatch } from '../common/settings-sync.js';
 
 console.log('[server] Starting Execkee controller server...');
 console.log(`[server] Data directory: ${config.DATA_DIR}`);
@@ -55,9 +56,36 @@ function startCycleTimer() {
 
 startCycleTimer();
 
+// ---- Settings sync (controller side) -------------------------------------
+// The controller is both the canonical store/rebroadcaster (in the hub) AND a
+// participating node (its own ~/.claude). When a workhorse's change is accepted,
+// apply it to the controller's own machine; watch the controller's own edits and
+// feed them into the same chokepoint.
+let stopSettingsWatch = () => {};
+function startSettingsSync() {
+  if (!config.SETTINGS_SYNC_ENABLED) { console.log('[server] Settings sync disabled'); return; }
+  hub.onSettingsAccepted = ({ name, content }) => applyIncoming({ name, content });
+
+  // Startup reconcile: pull canonical down where it's newer, then push local up
+  // where it's newer (ingest no-ops when content already matches).
+  for (const [name, rec] of Object.entries(hub.canonicalSettings)) {
+    const local = readSynced(name);
+    if (!local || rec.mtime > local.mtime) applyIncoming({ name, content: rec.content });
+  }
+  for (const f of snapshotLocal()) {
+    hub.ingestSettings({ ...f, origin: 'controller-local' });
+  }
+
+  stopSettingsWatch = startWatch((f) => hub.ingestSettings({ ...f, origin: 'controller-local' }));
+  console.log('[server] Settings sync active');
+}
+
+startSettingsSync();
+
 function shutdown() {
   console.log('[server] Shutting down...');
   if (cycleTimer) clearInterval(cycleTimer);
+  stopSettingsWatch();
   hub.stop();
   dashboard.stop();
   process.exit(0);

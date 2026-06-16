@@ -7,6 +7,7 @@ import { killActiveClaudeRuns } from '../common/exec-async.js';
 import { listLocalSessions } from './reporter.js';
 import { ServerConnection } from './connection.js';
 import { InstanceManager } from './instances.js';
+import { snapshotLocal, applyIncoming, startWatch } from '../common/settings-sync.js';
 
 function loadConfig() {
   const configPath = join(config.DATA_DIR, 'workhorse-config.json');
@@ -38,6 +39,17 @@ const connection = new ServerConnection({
   workhorseId,
   workhorseName,
   os: platform(),
+  // Settings sync: apply a settings file the controller pushed (loop-guarded inside
+  // applyIncoming so the ensuing watcher fire isn't echoed back).
+  onSettings: (msg) => {
+    if (!config.SETTINGS_SYNC_ENABLED) return;
+    applyIncoming({ name: msg.name, content: msg.content });
+  },
+  // On (re)connect, report our current settings so the controller reconciles.
+  onConnected: () => {
+    if (!config.SETTINGS_SYNC_ENABLED) return;
+    for (const f of snapshotLocal()) connection.sendSettingsReport(f);
+  },
   onSync: (records) => instanceManager.applySync(records),
   onCommand: async (msg) => {
     console.log(`[workhorse] Command: ${msg.command} for ${msg.instanceId || 'N/A'}`);
@@ -90,6 +102,13 @@ connection.connect();
 // Roster + startup now come from the controller via MSG.SYNC (onSync ->
 // applySync -> startAll), not from a shared disk. No immediate local startAll.
 
+// Settings sync: watch this machine's Claude settings for genuine local edits and
+// report them to the controller (which rebroadcasts to the other machines).
+let stopSettingsWatch = () => {};
+if (config.SETTINGS_SYNC_ENABLED) {
+  stopSettingsWatch = startWatch((f) => connection.sendSettingsReport(f));
+}
+
 const stateInterval = setInterval(() => {
   const state = instanceManager.getLocalState();
   connection.sendStateUpdate(state);
@@ -98,6 +117,7 @@ const stateInterval = setInterval(() => {
 function shutdown() {
   console.log('[workhorse] Shutting down...');
   clearInterval(stateInterval);
+  stopSettingsWatch();
   killActiveClaudeRuns(); // kill any in-flight report fork
   instanceManager.stopAll();
   connection.disconnect();

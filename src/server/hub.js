@@ -1,7 +1,9 @@
 import { WebSocketServer } from 'ws';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { MSG, CMD, parseMessage, makeMessage, maxDesiredState } from '../common/protocol.js';
 import { readTracking, writeTracking, registerWorkhorse, getInstancesForWorkhorse, createInstanceRecord } from '../common/tracking.js';
 import { writeState } from '../common/store.js';
+import { hashOf } from '../common/settings-sync.js';
 import config from '../common/config.js';
 
 // Fields a workhorse is the source of truth for — folded from STATE_UPDATE into
@@ -19,6 +21,10 @@ export class Hub {
     this.connections = new Map();
     this.liveState = {};
     this.pendingCallbacks = new Map();
+    // Canonical Claude-settings store (settings sync). { [name]: {content, mtime, hash, origin} }.
+    // Set by index.js to apply an accepted change to the controller's OWN machine.
+    this.canonicalSettings = this._loadCanonical();
+    this.onSettingsAccepted = () => {};
   }
 
   start() {
@@ -38,6 +44,9 @@ export class Hub {
             this.connections.set(workhorseId, ws);
             this._handleRegister(msg);
             console.log(`[hub] Workhorse registered: ${workhorseId}`);
+            // Converge the freshly-connected workhorse toward the canonical settings;
+            // it will also report its own, and the newer (by mtime) wins.
+            this.pushSettingsTo(workhorseId);
             break;
 
           case MSG.STATE_UPDATE:
@@ -54,6 +63,13 @@ export class Hub {
 
           case MSG.SESSIONS_RESULT:
             this._handleSessionsResult(msg);
+            break;
+
+          case MSG.SETTINGS_REPORT:
+            this.ingestSettings({
+              name: msg.name, content: msg.content, mtime: msg.mtime,
+              hash: msg.hash, origin: msg.workhorseId || workhorseId,
+            });
             break;
 
           case MSG.EVENT:
@@ -144,6 +160,65 @@ export class Hub {
       return true;
     }
     return false;
+  }
+
+  // ---- Settings sync (bidirectional Claude settings) ----------------------
+
+  _loadCanonical() {
+    try {
+      if (existsSync(config.SETTINGS_SYNC_FILE)) {
+        return JSON.parse(readFileSync(config.SETTINGS_SYNC_FILE, 'utf-8')) || {};
+      }
+    } catch (err) { console.error('[hub] load canonical settings failed:', err.message); }
+    return {};
+  }
+
+  _saveCanonical() {
+    try {
+      writeFileSync(config.SETTINGS_SYNC_FILE, JSON.stringify(this.canonicalSettings, null, 2), 'utf-8');
+    } catch (err) { console.error('[hub] save canonical settings failed:', err.message); }
+  }
+
+  // Single chokepoint for every settings change (from a workhorse OR the
+  // controller's own machine). Last-write-wins by mtime; only when content
+  // actually differs. On accept: persist, apply to the controller's own machine
+  // (when the change came from elsewhere), and rebroadcast to the other workhorses.
+  ingestSettings({ name, content, mtime, hash, origin }) {
+    if (!config.SETTINGS_SYNC_ENABLED) return false;
+    if (!name || typeof content !== 'string') return false;
+    const h = hash || hashOf(content);
+    const cur = this.canonicalSettings[name];
+    if (cur && cur.hash === h) return false;                 // no real change
+    if (cur && !(mtime >= cur.mtime)) return false;          // stale (older than canonical)
+    this.canonicalSettings[name] = { content, mtime, hash: h, origin };
+    this._saveCanonical();
+    console.log(`[hub] settings '${name}' updated from ${origin} (${content.length} bytes)`);
+    if (origin !== 'controller-local') {
+      try { this.onSettingsAccepted({ name, content, mtime, hash: h, origin }); }
+      catch (err) { console.error('[hub] onSettingsAccepted error:', err.message); }
+    }
+    this.broadcastSettings(name, origin);
+    return true;
+  }
+
+  // Send the whole canonical set to one workhorse (on connect).
+  pushSettingsTo(workhorseId) {
+    if (!config.SETTINGS_SYNC_ENABLED) return;
+    const ws = this.connections.get(workhorseId);
+    if (!ws || ws.readyState !== 1) return;
+    for (const [name, rec] of Object.entries(this.canonicalSettings)) {
+      ws.send(makeMessage(MSG.SETTINGS_PUSH, { name, content: rec.content, mtime: rec.mtime }));
+    }
+  }
+
+  // Push one updated file to every connected workhorse except the origin.
+  broadcastSettings(name, exceptId) {
+    const rec = this.canonicalSettings[name];
+    if (!rec) return;
+    for (const [wid, ws] of this.connections) {
+      if (wid === exceptId || ws.readyState !== 1) continue;
+      ws.send(makeMessage(MSG.SETTINGS_PUSH, { name, content: rec.content, mtime: rec.mtime }));
+    }
   }
 
   // Push a workhorse its authoritative roster (its own instances) from the

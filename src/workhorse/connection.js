@@ -3,7 +3,7 @@ import { MSG, parseMessage, makeMessage } from '../common/protocol.js';
 import config from '../common/config.js';
 
 export class ServerConnection {
-  constructor({ serverUrl, workhorseId, workhorseName, os, onCommand, onSync, onSettings }) {
+  constructor({ serverUrl, workhorseId, workhorseName, os, onCommand, onSync, onSettings, onConnected }) {
     this.serverUrl = serverUrl;
     this.workhorseId = workhorseId;
     this.workhorseName = workhorseName;
@@ -11,6 +11,7 @@ export class ServerConnection {
     this.onCommand = onCommand || (() => {});
     this.onSync = onSync || (() => {});
     this.onSettings = onSettings || (() => {});
+    this.onConnected = onConnected || (() => {});
     this.ws = null;
     this.connected = false;
     this.reconnectTimer = null;
@@ -36,6 +37,9 @@ export class ServerConnection {
         workhorseId: this.workhorseId,
         reason: 'startup',
       }));
+      // Report our current settings snapshot so the controller reconciles (newest
+      // by mtime wins). Fires on every (re)connect.
+      try { this.onConnected(); } catch (err) { console.error('[connection] onConnected error:', err.message); }
     });
 
     this.ws.on('message', (raw) => {
@@ -102,6 +106,17 @@ export class ServerConnection {
       success,
       error,
       requestId,
+    }));
+  }
+
+  sendSettingsReport({ name, content, mtime, hash }) {
+    if (!this.connected) return;
+    this.ws.send(makeMessage(MSG.SETTINGS_REPORT, {
+      workhorseId: this.workhorseId,
+      name,
+      content,
+      mtime,
+      hash,
     }));
   }
 
