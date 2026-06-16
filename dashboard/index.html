@@ -147,6 +147,18 @@
 
     .flag { background: rgba(255,93,82,0.12); border: 0.2vmin solid rgba(255,93,82,0.4); border-radius: 0.8vmin; padding: 1vmin 1.4vmin; font-size: 1.8vmin; color: #ffd2ce; }
     .empty { color: var(--muted); font-size: 1.7vmin; font-style: italic; }
+
+    /* Rotated display mode for a physically-turned screen (?rotate=left|right|off).
+       Swap the box dimensions and rotate about center so it fills the viewport.
+       'left' = top of the page on the LEFT (90° counter-clockwise). */
+    html.rotated { overflow: hidden; }
+    body.rot-left, body.rot-right {
+      position: absolute; top: 50%; left: 50%;
+      width: 100vh; height: 100vw; min-height: 0;
+      transform-origin: center center;
+    }
+    body.rot-left  { transform: translate(-50%, -50%) rotate(-90deg); }
+    body.rot-right { transform: translate(-50%, -50%) rotate(90deg); }
   </style>
 </head>
 <body>
@@ -281,6 +293,18 @@
     }
     applyTheme(localStorage.getItem('execkee-theme')||'day');
     tbtn.onclick=()=>{const next=document.documentElement.dataset.theme==='dark'?'day':'dark';localStorage.setItem('execkee-theme',next);applyTheme(next);};
+
+    // Rotated display (for a physically-turned screen). Set once per browser via
+    // ?rotate=left (top on the left) | ?rotate=right | ?rotate=off, then it sticks.
+    (function(){
+      const p=new URLSearchParams(location.search).get('rotate');
+      if(p) localStorage.setItem('execkee-rotate', p);
+      const r=localStorage.getItem('execkee-rotate');
+      if(r==='left'||r==='right'){
+        document.documentElement.classList.add('rotated');
+        document.body.classList.add(r==='left'?'rot-left':'rot-right');
+      }
+    })();
 
     let es;
     function connect(){
