@@ -34,6 +34,23 @@ try { payload = JSON.parse(clean); } catch {}
 const prompt = String(payload.prompt || '').trim().toLowerCase();
 const instanceId = process.env.EXECKEE_INSTANCE_ID;
 
+// KI-6: keep the instance's stored sessionId pointing at the LIVE session. The hook
+// runs INSIDE the instance and Claude Code passes the current session_id on stdin,
+// so this is exact and survives any branch/rewind/new-session. Update only on a real
+// change, and never let a tracking hiccup block the user's prompt (always fall
+// through to the control-word handling / pass-through below).
+const liveSessionId = String(payload.session_id || '').trim();
+if (instanceId && liveSessionId) {
+  try {
+    const t = readTracking();
+    const inst = t.instances[instanceId];
+    if (inst && inst.sessionId !== liveSessionId) {
+      updateInstance(t, instanceId, { sessionId: liveSessionId });
+      writeTracking(t);
+    }
+  } catch {}
+}
+
 // Pass through to the model for anything that isn't an in-instance control word.
 if (!instanceId || (prompt !== 'hide' && prompt !== 'close')) {
   process.exit(0);

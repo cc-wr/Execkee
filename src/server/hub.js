@@ -291,10 +291,13 @@ export class Hub {
       for (const f of WH_OWNED) {
         if (r[f] !== undefined) cur[f] = r[f];
       }
-      // KI-1: first-write-wins for sessionId. A created instance starts with no
-      // session id; the workhorse discovers the real one and reports it. Adopt it
-      // only when the master has none — never overwrite an existing identity.
-      if (!cur.sessionId && r.sessionId) cur.sessionId = r.sessionId;
+      // KI-1/KI-6: track the LIVE session id. A created instance starts with none
+      // and the workhorse discovers it; an adopted instance's session can also
+      // change (branch/rewind/new session). The workhorse — via its in-instance
+      // hook (exact session_id) and capture poll — is authoritative for the live
+      // session, so adopt any non-empty id it reports. (First-write-wins was wrong:
+      // it froze the master at a stale id, so restart resumed an old conversation.)
+      if (r.sessionId && r.sessionId !== cur.sessionId) cur.sessionId = r.sessionId;
       if (r.projectPath && r.projectPath !== cur.projectPath) cur.projectPath = r.projectPath;
       cur.desiredState = maxDesiredState(cur.desiredState, r.desiredState);
       changed = true;

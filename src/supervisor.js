@@ -38,6 +38,7 @@ let shuttingDown = false;
 const nodeChildren = [];
 let primaryPid = null;
 let primaryInterval = null;
+let primarySessionTimer = null;
 
 function log(tag, msg) {
   console.log(`[supervisor:${tag}] ${msg}`);
@@ -136,14 +137,40 @@ function writePrimarySessionId(sessionId) {
 
 const _normPath = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 
+// Newest session whose cwd is the life-tasks dir — i.e. the primary's own live
+// conversation. The cycle fork runs in the repo root and report forks don't persist
+// (--no-session-persistence), so the life-tasks slug holds ONLY primary sessions;
+// newest = the live one.
+function newestLifeTasksSession() {
+  try {
+    for (const s of listLocalSessions()) { // newest-first
+      if (_normPath(getSessionCwd(s.sessionId)) === _normPath(config.LIFE_TASKS_DIR)) return s.sessionId;
+    }
+  } catch {}
+  return null;
+}
+
 // A resumable primary = a stored session whose transcript still exists AND whose cwd
-// is the life-tasks dir (so we never --resume an unrelated session).
+// is the life-tasks dir (so we never --resume an unrelated session). KI-6: if the
+// stored id is missing/invalid, fall back to the newest life-tasks session rather
+// than starting a fresh seeded primary (which loses the conversation every restart).
 function resumablePrimarySession() {
   const id = readPrimarySessionId();
-  if (!id || !getSessionJsonlPath(id)) return null;
-  const cwd = getSessionCwd(id);
-  if (cwd && _normPath(cwd) !== _normPath(config.LIFE_TASKS_DIR)) return null;
-  return id;
+  if (id && getSessionJsonlPath(id)) {
+    const cwd = getSessionCwd(id);
+    if (!cwd || _normPath(cwd) === _normPath(config.LIFE_TASKS_DIR)) return id;
+  }
+  return newestLifeTasksSession();
+}
+
+// KI-6: keep PRIMARY_SESSION_FILE pointing at the live conversation so a restart
+// resumes the latest, not a stale snapshot. Cheap; runs on a timer.
+function refreshPrimarySession() {
+  const s = newestLifeTasksSession();
+  if (s && s !== readPrimarySessionId()) {
+    writePrimarySessionId(s);
+    log('primary', `tracked live primary session ${s.slice(0, 8)}`);
+  }
 }
 
 function launchClaude(cwd, argLine) {
@@ -222,6 +249,9 @@ function startPrimary() {
     log('primary', 'primary surface exited — relaunching');
     primaryPid = launchPrimaryWindow();
   }, 5000);
+  // KI-6: continuously track the live primary session so resume-on-restart never
+  // reverts to a stale snapshot (or a fresh seed).
+  primarySessionTimer = setInterval(() => { if (!shuttingDown) refreshPrimarySession(); }, 15_000);
 }
 
 function openDashboard() {
@@ -495,6 +525,7 @@ function shutdown() {
   shuttingDown = true;
   log('main', 'shutting down — stopping supervised processes');
   if (primaryInterval) clearInterval(primaryInterval);
+  if (primarySessionTimer) clearInterval(primarySessionTimer);
   for (const rec of nodeChildren) {
     if (rec.proc && !rec.proc.killed) {
       try { rec.proc.kill(); } catch {}
