@@ -188,7 +188,11 @@ function runHelper(params) {
 function doLaunch(instanceId, claudeArgs, projectPath) {
   const cwd = projectPath || process.cwd();
   const settings = ensureInstanceSettings();
-  const argString = [...claudeArgs, '--settings', settings].join(' ');
+  // Optional native Remote Control (EXECKEE_REMOTE_CONTROL=1). Safe to add here:
+  // instance launches carry no positional prompt, so `--remote-control` never
+  // swallows one as a session name. Degrades gracefully if RC is ineligible.
+  const rc = config.REMOTE_CONTROL_ENABLED ? ['--remote-control'] : [];
+  const argString = [...claudeArgs, ...rc, '--settings', settings].join(' ');
   const out = runHelper({ Action: 'launch', Cwd: cwd, ArgString: argString, InstanceId: instanceId, DataDir: config.DATA_DIR });
   const [pidStr, handleStr] = out.split(/\s+/);
   const pid = parseInt(pidStr, 10) || null;

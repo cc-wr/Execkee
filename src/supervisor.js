@@ -209,12 +209,17 @@ function schedulePrimaryCapture(beforeIds) {
 function launchPrimaryWindow() {
   const cwd = config.LIFE_TASKS_DIR;
   const settings = ensurePrimarySettings();
+  // Optional native Remote Control (EXECKEE_REMOTE_CONTROL=1). Added only to the
+  // resume path (no positional prompt there); the rare fresh-seed launch keeps its
+  // prompt clean — `--remote-control <text>` would otherwise treat the seed as the
+  // RC session name. The primary relaunches via resume, so RC activates right after.
+  const rc = config.REMOTE_CONTROL_ENABLED ? ' --remote-control' : '';
 
   // Resume the prior primary conversation across restarts when we have a valid one.
   const resumeId = resumablePrimarySession();
   if (resumeId) {
-    const pid = launchClaude(cwd, `--dangerously-skip-permissions --resume ${resumeId} --settings "${settings}"`);
-    if (pid) { log('primary', `launched (resumed ${resumeId.slice(0, 8)}) pid=${pid}`); return pid; }
+    const pid = launchClaude(cwd, `--dangerously-skip-permissions --resume ${resumeId} --settings "${settings}"${rc}`);
+    if (pid) { log('primary', `launched (resumed ${resumeId.slice(0, 8)})${rc ? ' [remote-control]' : ''} pid=${pid}`); return pid; }
     log('primary', 'resume launch produced no pid — falling back to a fresh primary');
   }
 

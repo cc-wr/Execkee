@@ -58,5 +58,11 @@ export default Object.freeze({
   SETTINGS_SYNC_POLL_MS: Number(process.env.EXECKEE_SETTINGS_POLL_MS) || 3000,
   SETTINGS_SYNC_FILE: join(SHARED_STORE_DIR, 'settings-sync.json'),
 
+  // Launch managed instances + the primary with Claude Code's native Remote Control
+  // (drive the window from claude.ai/code or the mobile app). Opt-in. It degrades
+  // gracefully — an RC-ineligible machine still launches the window normally — so no
+  // fallback is needed. Requires claude.ai OAuth login (not API key) + Pro/Max plan.
+  REMOTE_CONTROL_ENABLED: process.env.EXECKEE_REMOTE_CONTROL === '1',
+
   WINDOW_TITLE_PREFIX: 'Execkee',
 });
