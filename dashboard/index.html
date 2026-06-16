@@ -186,21 +186,13 @@
     </div>
 
     <div class="col">
-      <div class="panel" style="flex:0 0 auto;">
-        <h2>Instances</h2>
-        <div id="ilist"></div>
-      </div>
-      <div class="panel" style="flex:1;">
+      <div class="panel" style="flex:1 1 auto; min-height:40vmin;">
         <h2>From your instances <span style="color:var(--muted);font-weight:600">· not on your list</span></h2>
         <div id="plist"></div>
       </div>
       <div class="panel" style="flex:0 0 auto;">
         <h2>Tracked <span style="color:var(--muted);font-weight:600">· no instance</span></h2>
         <div id="covlist"></div>
-      </div>
-      <div class="panel" id="flags-panel" style="flex:0 0 auto; display:none;">
-        <h2>Flags</h2>
-        <div id="flist"></div>
       </div>
     </div>
   </div>
@@ -262,14 +254,9 @@
         return `<div class="pitem"><span class="pbullet">▸</span><span class="ptext">${esc(t.text)}</span>${tag}</div>`;
       }).join('') : '<div class="empty">Everything tracked is covered by an instance.</div>';
 
-      // instances
+      // instance count (header indicator; the per-instance panel was removed)
       const insts=data.instanceStatus||[];
       document.getElementById('inst-count').textContent=insts.length+(insts.length===1?' instance':' instances');
-      document.getElementById('ilist').innerHTML = insts.length ? insts.map(i=>{
-        const cls=i.reportFailing?'red':(i.visibility==='foreground'?'green':'blue');
-        const ago=i.lastReport?('reported '+timeAgo(new Date(i.lastReport))):(i.reportFailing?'report failing':'no report yet');
-        return `<div class="inst"><span class="dot ${cls}"></span><span>${esc(i.name)}</span><span class="meta">${i.visibility} · ${ago}</span></div>`;
-      }).join('') : '<div class="empty">No managed instances.</div>';
 
       // presumed tasks (from instances, not on the primary list)
       const pres=data.presumedTasks||[];
@@ -278,12 +265,6 @@
         const src=p.instance?`<span class="psrc">${esc(p.instance)}</span>`:'';
         return `<div class="pitem"><span class="pbullet">▸</span><span class="ptext">${esc(p.text)}${src}</span>${due}</div>`;
       }).join('') : '<div class="empty">Nothing surfaced from your instances.</div>';
-
-      // flags
-      const flags=data.flaggedEvents||[];
-      const fp=document.getElementById('flags-panel');
-      if(flags.length){fp.style.display='';document.getElementById('flist').innerHTML=flags.map(f=>`<div class="flag">${esc(f.name||f.instanceId)}: ${esc(f.type)}${f.error?(' — '+esc(String(f.error).slice(0,120))):''}</div>`).join('');}
-      else fp.style.display='none';
 
       // cycle freshness
       const cd=document.getElementById('cycle-dot'), ct=document.getElementById('cycle-text');
