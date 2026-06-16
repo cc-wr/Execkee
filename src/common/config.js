@@ -29,6 +29,9 @@ export default Object.freeze({
   CYCLE_REPORT_FILE: join(SHARED_STORE_DIR, 'cycle-report.json'),
   SENTENCE_QUEUE_FILE: join(SHARED_STORE_DIR, 'sentence-queue.json'),
   DAILY_TASKS_FILE: join(SHARED_STORE_DIR, 'daily-tasks.json'),
+  // Today's plan: confirmed backlog items + tentative LLM guesses (reset daily).
+  DAILY_PLAN_FILE: join(SHARED_STORE_DIR, 'daily-plan.json'),
+  DAILY_PLAN_ARCHIVE_FILE: join(SHARED_STORE_DIR, 'daily-plan-archive.json'),
   RESOLUTIONS_FILE: join(SHARED_STORE_DIR, 'resolutions.json'),
   DASHBOARD_DATA_FILE: join(SHARED_STORE_DIR, 'dashboard-data.json'),
   LIFE_TASKS_FILE: join(LIFE_TASKS_DIR, 'tasks.json'),

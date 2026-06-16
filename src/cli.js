@@ -313,6 +313,41 @@ switch (cmd) {
     break;
   }
 
+  case 'plan': {
+    // Today's plan: confirmed backlog items + tentative (LLM-guessed) tasks.
+    const data = await api('/api/dashboard-data');
+    const items = data.dailyTasks || [];
+    if (!items.length) { console.log('(no plan items today)'); break; }
+    for (const t of items) {
+      const tag = t.tentative ? ' [TENTATIVE]' : '';
+      const inst = t.instance ? ` · ${t.instance}` : ' · (no instance)';
+      const st = t.complete ? 'done' : (t.status || 'pending');
+      console.log(`  ${t.id}  ${t.text}  (${st}${inst})${tag}`);
+    }
+    const tentative = items.filter(t => t.tentative);
+    if (tentative.length) console.log(`\n${tentative.length} tentative — approve-task <id> / approve-task --all / reject-task <id>`);
+    break;
+  }
+
+  case 'approve-task': {
+    const all = args.includes('--all');
+    const id = args.find(a => !a.startsWith('--'));
+    if (!all && !id) { console.log('Usage: approve-task <id> | approve-task --all'); break; }
+    const result = await api('/api/approve-task', 'POST', all ? { all: true } : { id });
+    if (result.success === false) console.log(`Failed: ${result.error}`);
+    else if (all) console.log(`Approved ${result.approved} tentative task(s).`);
+    else console.log(`Approved: ${result.promoted}`);
+    break;
+  }
+
+  case 'reject-task': {
+    const id = args.find(a => !a.startsWith('--'));
+    if (!id) { console.log('Usage: reject-task <id>'); break; }
+    const result = await api('/api/reject-task', 'POST', { id });
+    console.log(result.success !== false ? 'Tentative task dropped.' : `Failed: ${result.error}`);
+    break;
+  }
+
   case 'sessions': {
     // Adoptable sessions live on EACH workhorse (its own ~/.claude/projects);
     // the controller aggregates them and tags which are already managed.
@@ -352,6 +387,9 @@ switch (cmd) {
     console.log('  dashboard                  Show raw dashboard data');
     console.log('  run-cycle                  Force a cycle now (regenerate the dashboard)');
     console.log('  refresh-tasks              Instantly refresh the dashboard task list from tasks.json (no cycle)');
+    console.log("  plan                       Today's plan (confirmed + tentative guesses, with ids)");
+    console.log('  approve-task <id> | --all  Approve a tentative guessed task (promotes it to the backlog)');
+    console.log('  reject-task <id>           Drop a tentative guessed task');
     console.log('  sessions [--all]           Adoptable sessions per workhorse (--all incl. managed)');
     console.log('  issue add <text>           Log an Execkee improvement/bug to the backlog');
     console.log('  issue [all]                List open (or all) backlog issues');

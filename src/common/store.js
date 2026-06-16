@@ -79,6 +79,24 @@ export function writeDailyTasks(data) {
   writeJson(config.DAILY_TASKS_FILE, data);
 }
 
+// --- Daily plan (today's working list: confirmed backlog + tentative guesses) ---
+
+export function readDailyPlan() {
+  return readJson(config.DAILY_PLAN_FILE, { date: null, items: [] });
+}
+
+export function writeDailyPlan(data) {
+  writeJson(config.DAILY_PLAN_FILE, data);
+}
+
+export function readDailyPlanArchive() {
+  return readJson(config.DAILY_PLAN_ARCHIVE_FILE, { days: [] });
+}
+
+export function writeDailyPlanArchive(data) {
+  writeJson(config.DAILY_PLAN_ARCHIVE_FILE, data);
+}
+
 // --- Resolutions ---
 
 export function readResolutions() {

@@ -26,7 +26,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 9;
+const BRIEF_VERSION = 10;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -384,6 +384,9 @@ Two different "stop" actions — choose by what the user means:
 - \`sentence\` / \`dashboard\` — current dashboard sentence / raw data
 - \`run-cycle\` — force a cycle now (re-reads instances + tasks, regenerates the dashboard)
 - \`refresh-tasks\` — instantly refresh the dashboard's task list after a task edit (cheap; no cycle)
+- \`plan\` — today's plan with ids (confirmed items + tentative guesses)
+- \`approve-task <id>\` / \`approve-task --all\` — approve a tentative guessed task (promotes it into the backlog)
+- \`reject-task <id>\` — drop a tentative guessed task
 - \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open] [--full-permissions]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default. \`--full-permissions\` runs it unattended (skips approval prompts).
 - \`create "<name>" [path] [--on <workhorse-id>]\` — new managed instance (on a chosen machine)
 - \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close (shuts the window; the session stays re-adoptable)
@@ -414,6 +417,29 @@ on a task (the dashboard donut shows completed / in-progress / not-done).
 **After EVERY task-store edit, immediately run \`refresh-tasks\`** so the dashboard
 reflects it at once — never make the user wait for the 30-minute cycle. (It just
 re-reads the tasks and updates the dashboard; no synthesis, instant.)
+
+When you mark a task done, set \`completedAt\` to an ISO date or timestamp (e.g.
+\`2026-06-16\` or \`2026-06-16T14:00:00Z\`) — the daily plan archives items completed
+before today, so a non-date value would wrongly hide a just-finished task.
+
+## Today's plan + tentative guesses (your approval gate)
+
+Each day the plan **resets**: completed items archive, incomplete confirmed ones
+carry forward, and Execkee makes a fresh **guess at today's tasks from the tracked
+files** (TRACKING.md + the context-sources). Those guesses are **tentative** — they
+are LLM proposals, NOT yet the user's real tasks, and show on the dashboard marked
+"tentative". **They only become real when the user approves them through you.**
+
+- Run \`plan\` to see today's items with ids and which are tentative.
+- When the user reviews them, surface the tentative ones and ask. On a yes:
+  \`approve-task <id>\` (or \`approve-task --all\`) — this promotes the guess into the
+  backlog so it persists and carries forward. On a no/irrelevant: \`reject-task <id>\`.
+- **Never approve on your own** — approval is the user's call; you only relay it.
+  Until approved, treat a tentative task as a suggestion, not an obligation.
+
+The dashboard also has a **"Tracked · no instance"** panel: plan tasks with no
+managed instance behind them (matched by name). If the user wants one worked, that's
+a cue to \`create\` or \`manage\` an instance for it.
 
 **A "done" rarely lives in one place — reconcile across all three.** When the user
 says a task is complete (or gives a status change), don't treat the task list, the

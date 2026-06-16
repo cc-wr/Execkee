@@ -5,8 +5,10 @@ import {
   readSentenceQueue, writeSentenceQueue,
   readCycleReport, writeCycleReport,
   readDailyTasks, writeDailyTasks,
-  readLifeTasks,
+  readLifeTasks, writeLifeTasks,
   readResolutions, writeResolutions,
+  readDailyPlan, writeDailyPlan,
+  readDailyPlanArchive, writeDailyPlanArchive,
 } from './common/store.js';
 import { DESIRED_STATE, VISIBILITY, CMD } from './common/protocol.js';
 import { readContextSources } from './common/context-sources.js';
@@ -14,21 +16,25 @@ import config from './common/config.js';
 
 export async function runCoworkCycle(hub) {
   const now = new Date();
-  const today = now.toISOString().split('T')[0];
-  console.log(`[cowork] === Cycle start: ${now.toISOString()} ===`);
+  const today = localDateStr(now);          // B3: roll over at LOCAL midnight
+  console.log(`[cowork] === Cycle start: ${now.toISOString()} (day ${today}) ===`);
 
-  // Step 0: Establish current date/time
   const cycleTime = now.toISOString();
 
-  // Step 1: Read life-tasks and generate/update daily task list
+  // Step 1: Build today's plan. On a local-date rollover this archives yesterday's
+  // completed items, carries forward incomplete confirmed ones, and re-guesses a
+  // tentative task list from the tracked files (once per day).
+  const tracking = readTracking();
+  const instances = Object.values(tracking.instances);
   const lifeTasks = readLifeTasks();
-  const dailyTasks = generateDailyTasks(lifeTasks, today);
+  const contextSources = readContextSources();
+  const plan = await buildDailyPlan({ today, lifeTasks, instances, contextBlock: contextSources });
+  // Confirmed-only view drives the sentence synthesis + the legacy daily-tasks store.
+  const dailyTasks = { date: plan.date, tasks: plan.items.filter(i => !i.tentative) };
   writeDailyTasks(dailyTasks);
 
   // Step 2: Collect reports from recently-active hidden instances
-  const tracking = readTracking();
   const instanceReports = [];
-  const instances = Object.values(tracking.instances);
 
   for (const inst of instances) {
     if (inst.desiredState !== DESIRED_STATE.ALIVE) continue;
@@ -58,10 +64,9 @@ export async function runCoworkCycle(hub) {
     }
   }
 
-  // Step 3: Reconcile resolutions + read extra context (tracking log + configured sources)
+  // Step 3: Reconcile resolutions (extra context already read in Step 1)
   const resolutions = readResolutions();
   const previousQueue = readSentenceQueue();
-  const contextSources = readContextSources();
 
   // Step 4 + 5: Author cycle report and derive sentence queue
   const cycleReport = await authorCycleReport({
@@ -90,7 +95,8 @@ export async function runCoworkCycle(hub) {
       ? { id: sentenceQueue.major.id, text: sentenceQueue.major.text, priority: 1 }
       : null,
     standby: !sentenceQueue.major,
-    dailyTasks: dailyTasks.tasks,
+    dailyTasks: plan.items,
+    coverageTasks: plan.items.filter(i => !i.instance),
     presumedTasks: cycleReport.presumedTasks || [],
     instanceStatus: instances
       .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
@@ -122,51 +128,231 @@ export async function runCoworkCycle(hub) {
   console.log(`[cowork] Sentence: ${sentenceQueue.major?.text || 'Stand by.'}`);
 }
 
-function generateDailyTasks(lifeTasks, today) {
-  const tasks = (lifeTasks.tasks || []).map(task => {
-    let status = 'pending';
-    if (task.completedAt) {
-      status = 'complete';
-    } else if (task.due && task.due < today) {
-      status = 'overdue';
-    } else if (task.due === today) {
-      status = 'due-today';
-    }
+// ---- Daily plan: today's working list (confirmed backlog + tentative guesses) ----
 
-    return {
-      id: task.id,
-      text: task.text,
-      due: task.due || null,
-      priority: task.priority || 'normal',
-      status,
-      complete: !!task.completedAt,
-      inProgress: !!task.inProgress && !task.completedAt,
-    };
-  });
-
-  tasks.sort((a, b) => {
-    const statusOrder = { overdue: 0, 'due-today': 1, pending: 2, complete: 3 };
-    const prioOrder = { high: 0, normal: 1, low: 2 };
-    const sd = (statusOrder[a.status] || 2) - (statusOrder[b.status] || 2);
-    if (sd !== 0) return sd;
-    return (prioOrder[a.priority] || 1) - (prioOrder[b.priority] || 1);
-  });
-
-  return { date: today, tasks };
+// Local calendar date (YYYY-MM-DD) so the daily reset rolls over at LOCAL midnight.
+function localDateStr(d = new Date()) {
+  const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return t.toISOString().slice(0, 10);
 }
 
-// Cheap, fork-free dashboard refresh for task edits: re-read tasks.json and update
-// ONLY the dashboard's task list (donut + dailyTasks). No Claude synthesis, so a
-// task change shows immediately instead of waiting for the next 30-min cycle.
-export function refreshDashboardTasks() {
-  const today = new Date().toISOString().split('T')[0];
-  const dailyTasks = generateDailyTasks(readLifeTasks(), today);
-  writeDailyTasks(dailyTasks);
+function normText(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+
+// A3: match a task to a managed instance BY NAME — exact substring, or all the
+// significant words of the instance name appearing in the task text.
+function matchInstance(text, instanceNames) {
+  const t = normText(text);
+  if (!t) return null;
+  for (const name of instanceNames) {
+    const n = normText(name);
+    if (!n) continue;
+    if (t.includes(n)) return name;
+    const words = n.split(' ').filter(w => w.length > 3);
+    if (words.length && words.every(w => t.includes(w))) return name;
+  }
+  return null;
+}
+
+function computeStatus(task, today) {
+  if (task.completedAt) return 'complete';
+  if (task.due && task.due < today) return 'overdue';
+  if (task.due === today) return 'due-today';
+  return 'pending';
+}
+
+function sortPlanItems(items) {
+  const statusOrder = { overdue: 0, 'due-today': 1, pending: 2, complete: 3 };
+  const prioOrder = { high: 0, normal: 1, low: 2 };
+  return items.slice().sort((a, b) => {
+    if (!!a.tentative !== !!b.tentative) return a.tentative ? 1 : -1; // tentative last
+    const sd = (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2);
+    if (sd !== 0) return sd;
+    return (prioOrder[a.priority] ?? 1) - (prioOrder[b.priority] ?? 1);
+  });
+}
+
+// Backlog (tasks.json) → today's confirmed plan items: every incomplete task, plus
+// any completed TODAY (so the donut shows the day's progress; older completions drop
+// off — the daily reset). Each tagged with its by-name instance match.
+function backlogToPlanItems(lifeTasks, today, instanceNames) {
+  return (lifeTasks.tasks || [])
+    .filter(t => !t.completedAt || String(t.completedAt).slice(0, 10) === today)
+    .map(t => ({
+      id: t.id,
+      text: t.text,
+      due: t.due || null,
+      priority: t.priority || 'normal',
+      status: computeStatus(t, today),
+      source: 'backlog',
+      tentative: false,
+      instance: matchInstance(t.text, instanceNames),
+      complete: !!t.completedAt,
+      inProgress: !!t.inProgress && !t.completedAt,
+    }));
+}
+
+// On a date rollover, snapshot the prior day's completed items into the archive
+// (kept in history per A2; tasks.json also retains completedAt).
+function archiveCompleted(prevPlan) {
+  if (!prevPlan || !prevPlan.date || !(prevPlan.items || []).length) return;
+  const done = prevPlan.items.filter(i => i.complete);
+  if (!done.length) return;
+  const archive = readDailyPlanArchive();
+  archive.days = archive.days || [];
+  archive.days.push({ date: prevPlan.date, archivedAt: new Date().toISOString(), items: done });
+  if (archive.days.length > 120) archive.days = archive.days.slice(-120);
+  writeDailyPlanArchive(archive);
+}
+
+// LLM guess at today's tasks from the tracked files (TRACKING.md + context sources).
+// Marked tentative; the user approves via the primary. Best-effort — a failure
+// yields no guesses, never throws (it must not break the cycle).
+async function guessTasksFromTrackedFiles({ contextBlock, today }) {
+  if (!contextBlock || !contextBlock.trim()) return [];
+  const prompt = [
+    "Infer a TENTATIVE list of the user's tasks for today from their tracked files below.",
+    'These are GUESSES the user will review and approve — be concrete and conservative;',
+    'propose only work the files actually support, and do NOT restate routine/standing notes.',
+    'Output ONLY valid JSON: {"tasks":[{"text":"...","due":null,"priority":"normal"}]} (max ~8 items, no commentary).',
+    '',
+    '=== TRACKED FILES ===',
+    contextBlock,
+  ].join('\n');
+  try {
+    const output = await claudeRun(['-p', '--output-format', 'json', prompt]);
+    const parsed = parseSynthesis(output);
+    const list = (parsed && parsed.tasks) || [];
+    return list.map((t, i) => ({
+      id: `guess-${today}-${i}`,
+      text: String(t.text || '').trim(),
+      due: t.due || null,
+      priority: ['high', 'normal', 'low'].includes(t.priority) ? t.priority : 'normal',
+      status: 'pending',
+      source: 'guess',
+      tentative: true,
+      instance: null,
+      complete: false,
+      inProgress: false,
+    })).filter(t => t.text);
+  } catch (err) {
+    console.error('[cowork] tracked-file task guess failed:', err.message);
+    return [];
+  }
+}
+
+// Build today's plan. Re-guesses tentative tasks on a date rollover (once/day);
+// otherwise preserves the existing guesses and their approval state.
+async function buildDailyPlan({ today, lifeTasks, instances, contextBlock }) {
+  const prev = readDailyPlan();
+  const rollover = prev.date !== today;
+  const instanceNames = instances
+    .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
+    .map(i => i.name).filter(Boolean);
+
+  const backlogItems = backlogToPlanItems(lifeTasks, today, instanceNames);
+
+  let guesses;
+  if (rollover) {
+    archiveCompleted(prev);
+    guesses = await guessTasksFromTrackedFiles({ contextBlock, today });
+  } else {
+    guesses = (prev.items || []).filter(i => i.source === 'guess');
+  }
+  const backlogTexts = new Set(backlogItems.map(i => normText(i.text)));
+  guesses = guesses
+    .map(g => ({ ...g, instance: matchInstance(g.text, instanceNames) }))
+    .filter(g => g.text && !backlogTexts.has(normText(g.text)));
+
+  const plan = { date: today, items: sortPlanItems([...backlogItems, ...guesses]) };
+  writeDailyPlan(plan);
+  return plan;
+}
+
+// Fork-free rebuild (instant task refresh + approval mutations): refresh the backlog
+// portion + statuses, preserve existing guesses (no re-guess), re-match instances.
+function rebuildPlanSync(today, instances) {
+  const lifeTasks = readLifeTasks();
+  const instanceNames = instances
+    .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
+    .map(i => i.name).filter(Boolean);
+  const prev = readDailyPlan();
+  const backlogItems = backlogToPlanItems(lifeTasks, today, instanceNames);
+  let guesses = prev.date === today ? (prev.items || []).filter(i => i.source === 'guess') : [];
+  const backlogTexts = new Set(backlogItems.map(i => normText(i.text)));
+  guesses = guesses
+    .map(g => ({ ...g, instance: matchInstance(g.text, instanceNames) }))
+    .filter(g => g.text && !backlogTexts.has(normText(g.text)));
+  const plan = { date: today, items: sortPlanItems([...backlogItems, ...guesses]) };
+  writeDailyPlan(plan);
+  return plan;
+}
+
+function writePlanToDashboard(plan) {
   const data = readDashboardData();
-  data.dailyTasks = dailyTasks.tasks;
+  data.dailyTasks = plan.items;
+  data.coverageTasks = plan.items.filter(i => !i.instance);
   data.updatedBy = 'task-refresh';
   writeDashboardData(data);
-  return dailyTasks.tasks.length;
+}
+
+// B2: approving a tentative guess promotes it into the backlog (tasks.json) so it
+// persists and carries forward — the primary-approval is the human gate that lets
+// the (now-approved) item into the durable list.
+function promoteToBacklog(items) {
+  const life = readLifeTasks();
+  life.tasks = life.tasks || [];
+  const existing = new Set(life.tasks.map(t => normText(t.text)));
+  let n = 0;
+  for (const it of items) {
+    if (existing.has(normText(it.text))) continue;
+    life.tasks.push({ id: `t-${Date.now().toString(36)}-${n++}`, text: it.text, due: it.due || null, priority: it.priority || 'normal' });
+    existing.add(normText(it.text));
+  }
+  writeLifeTasks(life);
+}
+
+export function approveTask(id) {
+  const today = localDateStr();
+  const plan = readDailyPlan();
+  const item = (plan.items || []).find(i => i.id === id && i.tentative);
+  if (!item) return { success: false, error: `No tentative task with id ${id}` };
+  promoteToBacklog([item]);
+  const p = rebuildPlanSync(today, Object.values(readTracking().instances));
+  writePlanToDashboard(p);
+  return { success: true, promoted: item.text };
+}
+
+export function approveAllTentative() {
+  const today = localDateStr();
+  const plan = readDailyPlan();
+  const tentatives = (plan.items || []).filter(i => i.tentative);
+  if (!tentatives.length) return { success: true, approved: 0 };
+  promoteToBacklog(tentatives);
+  const p = rebuildPlanSync(today, Object.values(readTracking().instances));
+  writePlanToDashboard(p);
+  return { success: true, approved: tentatives.length };
+}
+
+export function rejectTask(id) {
+  const today = localDateStr();
+  const plan = readDailyPlan();
+  const before = (plan.items || []).length;
+  plan.items = (plan.items || []).filter(i => !(i.id === id && i.tentative));
+  if (plan.items.length === before) return { success: false, error: `No tentative task with id ${id}` };
+  writeDailyPlan(plan);
+  const p = rebuildPlanSync(today, Object.values(readTracking().instances));
+  writePlanToDashboard(p);
+  return { success: true };
+}
+
+// Cheap, fork-free dashboard refresh for task edits: rebuild today's plan from the
+// current backlog (+ persisted guesses) and update the dashboard at once. No Claude
+// synthesis, so a task change shows immediately instead of waiting for the cycle.
+export function refreshDashboardTasks() {
+  const today = localDateStr();
+  const plan = rebuildPlanSync(today, Object.values(readTracking().instances));
+  writePlanToDashboard(plan);
+  return plan.items.length;
 }
 
 async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports, resolutions, previousQueue, tracking, contextSources }) {

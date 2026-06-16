@@ -130,6 +130,9 @@
     .chip.overdue { background: rgba(255,93,82,0.2); color: var(--red); }
     .chip.due-today { background: rgba(240,168,48,0.2); color: var(--amber); }
     .chip.inprogress { background: rgba(74,163,255,0.2); color: var(--blue); }
+    .chip.tentative { background: rgba(120,130,150,0.18); color: var(--muted); border: 0.2vmin dashed var(--gray); }
+    .titem.tentative { opacity: 0.8; }
+    .titem.tentative .check { border-style: dashed; }
 
     /* --- Instances --- */
     .inst { display: flex; align-items: center; gap: 1.4vmin; font-size: 2vmin; padding: 0.5vmin 0; }
@@ -167,7 +170,7 @@
 
   <div class="grid">
     <div class="panel">
-      <h2>Your Tasks</h2>
+      <h2>Your Tasks <span id="tentative-note" style="color:var(--amber);font-weight:600"></span></h2>
       <div class="tasks-head">
         <div class="donut-wrap">
           <div class="donut" id="donut"></div>
@@ -190,6 +193,10 @@
       <div class="panel" style="flex:1;">
         <h2>From your instances <span style="color:var(--muted);font-weight:600">· not on your list</span></h2>
         <div id="plist"></div>
+      </div>
+      <div class="panel" style="flex:0 0 auto;">
+        <h2>Tracked <span style="color:var(--muted);font-weight:600">· no instance</span></h2>
+        <div id="covlist"></div>
       </div>
       <div class="panel" id="flags-panel" style="flex:0 0 auto; display:none;">
         <h2>Flags</h2>
@@ -218,12 +225,14 @@
       if(data.standby||!data.sentence){txt.textContent='Stand by.';icon.textContent='○';id.textContent='';}
       else{txt.textContent=data.sentence.text;icon.textContent=u==='red'?'⚠':(u==='amber'?'⏰':'➤');id.textContent='#'+(data.sentence.id||'');}
 
-      // donut + legend
+      // donut + legend (counts CONFIRMED items only — tentative guesses aren't real yet)
       const tasks=data.dailyTasks||[];
-      const done=tasks.filter(t=>t.complete).length;
-      const prog=tasks.filter(t=>!t.complete&&t.inProgress).length;
-      const todo=tasks.length-done-prog;
-      const total=tasks.length||1;
+      const confirmed=tasks.filter(t=>!t.tentative);
+      const tentative=tasks.filter(t=>t.tentative);
+      const done=confirmed.filter(t=>t.complete).length;
+      const prog=confirmed.filter(t=>!t.complete&&t.inProgress).length;
+      const todo=confirmed.length-done-prog;
+      const total=confirmed.length||1;
       const dDeg=done/total*360, pDeg=(done+prog)/total*360;
       document.getElementById('donut').style.background=
         `conic-gradient(var(--green) 0 ${dDeg}deg, var(--blue) ${dDeg}deg ${pDeg}deg, var(--gray) ${pDeg}deg 360deg)`;
@@ -231,18 +240,27 @@
       document.getElementById('lg-done').textContent=done;
       document.getElementById('lg-prog').textContent=prog;
       document.getElementById('lg-todo').textContent=todo;
+      document.getElementById('tentative-note').textContent = tentative.length ? `· ${tentative.length} tentative (approve via primary)` : '';
 
-      // task list
+      // task list (tentative guesses shown muted with a chip; confirmed first)
       document.getElementById('tlist').innerHTML = tasks.length ? tasks.map(t=>{
-        const cls=['titem']; if(t.complete)cls.push('complete'); else if(t.inProgress)cls.push('inprogress');
+        const cls=['titem']; if(t.tentative)cls.push('tentative'); if(t.complete)cls.push('complete'); else if(t.inProgress)cls.push('inprogress');
         let chip='';
-        if(!t.complete){
+        if(t.tentative)chip='<span class="chip tentative">tentative</span>';
+        else if(!t.complete){
           if(t.status==='overdue')chip='<span class="chip overdue">overdue</span>';
           else if(t.status==='due-today')chip='<span class="chip due-today">today</span>';
           else if(t.inProgress)chip='<span class="chip inprogress">in progress</span>';
         }
         return `<div class="${cls.join(' ')}"><span class="check"></span><span class="ttext">${esc(t.text)}</span>${chip}</div>`;
       }).join('') : '<div class="empty">No tasks today.</div>';
+
+      // coverage: tracked-file tasks with no managed instance behind them
+      const cov=data.coverageTasks||[];
+      document.getElementById('covlist').innerHTML = cov.length ? cov.map(t=>{
+        const tag=t.tentative?'<span class="chip tentative">tentative</span>':'';
+        return `<div class="pitem"><span class="pbullet">▸</span><span class="ptext">${esc(t.text)}</span>${tag}</div>`;
+      }).join('') : '<div class="empty">Everything tracked is covered by an instance.</div>';
 
       // instances
       const insts=data.instanceStatus||[];

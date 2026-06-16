@@ -46,6 +46,21 @@ dashboard.onRefreshTasks = async () => {
   dashboard.pushUpdate();
 };
 
+// Approve / reject a tentative (LLM-guessed) task. Approval promotes it into the
+// backlog (tasks.json) so it persists; both refresh the dashboard.
+dashboard.onApproveTask = async ({ id, all }) => {
+  const { approveTask, approveAllTentative } = await import('../cowork.js');
+  const result = all ? approveAllTentative() : approveTask(id);
+  dashboard.pushUpdate();
+  return result;
+};
+dashboard.onRejectTask = async (id) => {
+  const { rejectTask } = await import('../cowork.js');
+  const result = rejectTask(id);
+  dashboard.pushUpdate();
+  return result;
+};
+
 function startCycleTimer() {
   setTimeout(() => {
     runCycle();

@@ -19,6 +19,8 @@ export class DashboardServer {
     this.sseClients = new Set();
     this.onRunCycle = null; // set by index.js; runs a cycle on demand
     this.onRefreshTasks = null; // set by index.js; cheap dashboard task refresh
+    this.onApproveTask = null; // set by index.js; approve a tentative guess (or all)
+    this.onRejectTask = null; // set by index.js; drop a tentative guess
   }
 
   start() {
@@ -77,6 +79,14 @@ export class DashboardServer {
 
     if (url.pathname === '/api/refresh-tasks' && req.method === 'POST') {
       return this._handleApiRefreshTasks(req, res);
+    }
+
+    if (url.pathname === '/api/approve-task' && req.method === 'POST') {
+      return this._handleApiApproveTask(req, res);
+    }
+
+    if (url.pathname === '/api/reject-task' && req.method === 'POST') {
+      return this._handleApiRejectTask(req, res);
     }
 
     if (url.pathname === '/' || url.pathname === '/index.html') {
@@ -220,6 +230,42 @@ export class DashboardServer {
       res.end(JSON.stringify({ success: true }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  async _handleApiApproveTask(req, res) {
+    const body = await this._readBody(req);
+    if (!this.onApproveTask) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'No approve-task wired' }));
+      return;
+    }
+    try {
+      const { id, all } = JSON.parse(body || '{}');
+      const result = await this.onApproveTask({ id, all: !!all });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  async _handleApiRejectTask(req, res) {
+    const body = await this._readBody(req);
+    if (!this.onRejectTask) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'No reject-task wired' }));
+      return;
+    }
+    try {
+      const { id } = JSON.parse(body || '{}');
+      const result = await this.onRejectTask(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: err.message }));
     }
   }
