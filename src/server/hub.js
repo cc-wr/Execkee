@@ -1,6 +1,6 @@
 import { WebSocketServer } from 'ws';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { MSG, CMD, parseMessage, makeMessage, maxDesiredState } from '../common/protocol.js';
+import { MSG, CMD, DESIRED_STATE, parseMessage, makeMessage, maxDesiredState } from '../common/protocol.js';
 import { readTracking, writeTracking, registerWorkhorse, getInstancesForWorkhorse, createInstanceRecord } from '../common/tracking.js';
 import { writeState } from '../common/store.js';
 import { hashOf } from '../common/settings-sync.js';
@@ -343,8 +343,14 @@ export class Hub {
   async listSessions() {
     const connected = this.getConnectedWorkhorses();
     const tracking = readTracking();
+    // Only an ACTIVELY-managed instance occupies its session. A closed/failed
+    // instance has released it, so the session must reappear as adoptable —
+    // otherwise a session you once managed and closed can never be re-adopted from
+    // the default list (it stays hidden as "managed" though nothing manages it).
     const managed = new Set(
-      Object.values(tracking.instances).map(i => i.sessionId).filter(Boolean)
+      Object.values(tracking.instances)
+        .filter(i => i.desiredState !== DESIRED_STATE.CLOSED && i.desiredState !== DESIRED_STATE.FAILED)
+        .map(i => i.sessionId).filter(Boolean)
     );
     const groups = await Promise.all(connected.map(async (whId) => {
       const r = await this.sendCommand(whId, CMD.LIST_SESSIONS);

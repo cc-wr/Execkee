@@ -75,6 +75,11 @@ enumerated (no local workhorse to ask), and (b) a workhorse that is momentarily
 disconnected (heartbeat reconnect) yields an empty list. The CLI already prints
 "No workhorses connected" / per-host "(could not list: …)". *Recommended follow-up
 (not yet done):* also surface the controller-local sessions, and a per-host count.
+**Update (2026-06-16):** found a concrete instance — a session you adopted then
+**closed** stayed tagged `managed` and was filtered out of the default `sessions`
+list *forever*, so the primary "couldn't find" it for re-adoption (hit when trying
+to adopt this dev session). Fixed: only ALIVE/CLOSING instances occupy their session;
+closed/failed ones release it back to adoptable (`hub.listSessions`).
 
 **Bug B — "recovery loses history since initial adopt."** Two distinct paths:
   - **Created instances (root cause, FIXED):** a created instance had no `sessionId`,
