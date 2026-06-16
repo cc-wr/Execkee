@@ -519,7 +519,12 @@ function buildCyclePrompt({ cycleTime, today, overdueTasks, dueTodayTasks, incom
     'represented in the user\'s task list above. These are things the user likely needs ' +
     'to do, surfaced from their managed conversations, that they have not yet written ' +
     'down as tasks. One entry per discrete action; do not duplicate an existing task; ' +
-    'keep the text short and actionable; include a due date only if the report states one.',
+    'keep the text short and actionable; include a due date only if the report states one. ' +
+    'The TRACKING LOG is binding for presumed tasks too: if the user has deferred, dropped, ' +
+    'or put a topic on hold (e.g. "push the launch to Friday", "not now", "waiting on X", ' +
+    '"dropping Y"), OMIT presumed tasks related to that topic (until any stated date). ' +
+    'Deferring a topic in TRACKING.md must make its related action items disappear from ' +
+    'this list — do not re-surface them.',
     'Output JSON:',
     '{',
     '  "summary": "one-paragraph synthesis",',
