@@ -21,6 +21,7 @@ export class DashboardServer {
     this.onRefreshTasks = null; // set by index.js; cheap dashboard task refresh
     this.onApproveTask = null; // set by index.js; approve a tentative guess (or all)
     this.onRejectTask = null; // set by index.js; drop a tentative guess
+    this.onRegenerateGuesses = null; // set by index.js; force a fresh tracked-file guess
   }
 
   start() {
@@ -87,6 +88,10 @@ export class DashboardServer {
 
     if (url.pathname === '/api/reject-task' && req.method === 'POST') {
       return this._handleApiRejectTask(req, res);
+    }
+
+    if (url.pathname === '/api/regenerate-guesses' && req.method === 'POST') {
+      return this._handleApiRegenerateGuesses(req, res);
     }
 
     if (url.pathname === '/' || url.pathname === '/index.html') {
@@ -266,6 +271,22 @@ export class DashboardServer {
       res.end(JSON.stringify(result));
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  async _handleApiRegenerateGuesses(req, res) {
+    if (!this.onRegenerateGuesses) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'No regenerate-guesses wired' }));
+      return;
+    }
+    try {
+      const result = await this.onRegenerateGuesses();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: err.message }));
     }
   }

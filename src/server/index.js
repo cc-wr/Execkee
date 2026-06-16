@@ -61,6 +61,14 @@ dashboard.onRejectTask = async (id) => {
   return result;
 };
 
+// Force a fresh tracked-file task guess now (doesn't wait for the daily rollover).
+dashboard.onRegenerateGuesses = async () => {
+  const { regenerateGuesses } = await import('../cowork.js');
+  const result = await regenerateGuesses();
+  dashboard.pushUpdate();
+  return result;
+};
+
 function startCycleTimer() {
   setTimeout(() => {
     runCycle();

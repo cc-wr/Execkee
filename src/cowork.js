@@ -247,18 +247,20 @@ async function guessTasksFromTrackedFiles({ contextBlock, today }) {
 
 // Build today's plan. Re-guesses tentative tasks on a date rollover (once/day);
 // otherwise preserves the existing guesses and their approval state.
-async function buildDailyPlan({ today, lifeTasks, instances, contextBlock }) {
+async function buildDailyPlan({ today, lifeTasks, instances, contextBlock, forceGuess = false }) {
   const prev = readDailyPlan();
   const rollover = prev.date !== today;
+  if (rollover) archiveCompleted(prev);
   const instanceNames = instances
     .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
     .map(i => i.name).filter(Boolean);
 
   const backlogItems = backlogToPlanItems(lifeTasks, today, instanceNames);
 
+  // Re-ask the model on a date rollover (once/day) or an explicit forced regen;
+  // otherwise keep the day's existing guesses (and their approval state).
   let guesses;
-  if (rollover) {
-    archiveCompleted(prev);
+  if (rollover || forceGuess) {
     guesses = await guessTasksFromTrackedFiles({ contextBlock, today });
   } else {
     guesses = (prev.items || []).filter(i => i.source === 'guess');
@@ -364,6 +366,20 @@ export function refreshDashboardTasks() {
   const plan = rebuildPlanSync(today, Object.values(readTracking().instances));
   writePlanToDashboard(plan);
   return plan.items.length;
+}
+
+// Force a fresh tentative-task guess from the tracked files NOW, without waiting for
+// the daily (midnight) rollover. Runs the LLM guesser and replaces the day's guesses;
+// does NOT archive (it's still the same day). Used by the `regenerate-guesses`
+// command / when the user asks to re-guess.
+export async function regenerateGuesses() {
+  const today = localDateStr();
+  const instances = Object.values(readTracking().instances);
+  const lifeTasks = readLifeTasks();
+  const contextBlock = readContextSources();
+  const plan = await buildDailyPlan({ today, lifeTasks, instances, contextBlock, forceGuess: true });
+  writePlanToDashboard(plan);
+  return { success: true, guesses: plan.items.filter(i => i.source === 'guess').length };
 }
 
 async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports, resolutions, previousQueue, tracking, contextSources }) {

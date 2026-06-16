@@ -26,7 +26,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 11;
+const BRIEF_VERSION = 12;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -387,6 +387,7 @@ Two different "stop" actions — choose by what the user means:
 - \`plan\` — today's plan with ids (confirmed items + tentative guesses)
 - \`approve-task <id>\` / \`approve-task --all\` — approve a tentative guessed task (promotes it into the backlog)
 - \`reject-task <id>\` — drop a tentative guessed task
+- \`regenerate-guesses\` — force a fresh tracked-file task guess now (don't wait for the daily rollover). Run this whenever the user asks to **re-guess / regenerate / re-do the guessed tasks** (e.g. after they update a tracked doc). Takes a moment (it re-reads the tracked files and re-asks the model); it replaces today's tentative guesses, leaving confirmed/approved tasks untouched.
 - \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open] [--full-permissions]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default. \`--full-permissions\` runs it unattended (skips approval prompts).
 - \`create "<name>" [path] [--on <workhorse-id>]\` — new managed instance (on a chosen machine)
 - \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close (shuts the window; the session stays re-adoptable)

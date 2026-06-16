@@ -348,6 +348,14 @@ switch (cmd) {
     break;
   }
 
+  case 'regenerate-guesses': {
+    // Forces a fresh tracked-file task guess now (LLM fork — takes a moment).
+    const result = await api('/api/regenerate-guesses', 'POST', {});
+    if (result.success === false) console.log(`Failed: ${result.error}`);
+    else console.log(`Regenerated tentative guesses (${result.guesses} guessed task(s)).`);
+    break;
+  }
+
   case 'sessions': {
     // Adoptable sessions live on EACH workhorse (its own ~/.claude/projects);
     // the controller aggregates them and tags which are already managed.
@@ -390,6 +398,7 @@ switch (cmd) {
     console.log("  plan                       Today's plan (confirmed + tentative guesses, with ids)");
     console.log('  approve-task <id> | --all  Approve a tentative guessed task (promotes it to the backlog)');
     console.log('  reject-task <id>           Drop a tentative guessed task');
+    console.log('  regenerate-guesses         Force a fresh tracked-file task guess now (no wait for the daily rollover)');
     console.log('  sessions [--all]           Adoptable sessions per workhorse (--all incl. managed)');
     console.log('  issue add <text>           Log an Execkee improvement/bug to the backlog');
     console.log('  issue [all]                List open (or all) backlog issues');
