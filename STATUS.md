@@ -1,6 +1,6 @@
 # Execkee — Status
 
-_Last updated: 2026-06-15._
+_Last updated: 2026-06-16._
 
 A controller-and-workhorse system that manages permanent Claude Code instances,
 runs a 30-minute life-tracking cycle, and surfaces the single most pressing issue
@@ -29,7 +29,9 @@ for the full design and its codicils.
   - ✅ Bootstrap installs a real **git clone** (committable) and installs Git for Windows portably if missing; on re-run it **auto-`git pull --ff-only`**.
   - ✅ **Resilience — dead-workhorse detection**: the hub drops a connection silent for ~3 heartbeat intervals (~90s), not only on a clean socket close.
   - ✅ **Boot-persistence (logon)**: `scripts/install-startup.ps1` registers a no-admin Startup-folder launcher so the controller/workhorse starts at logon.
-  - ⏳ Remaining: **primary resume-on-restart** (designed; deferred — it changes the high-blast-radius primary launch and needs a window-launch restart to verify); **created-instance session capture** (KI-1; needs window-launch verification); **before-logon service** (vs the logon-startup above); **`.claude` settings sync** (low value — instance settings are already consistent across workhorses via shared code; broader sync is credential-sensitive).
+  - ✅ **Primary resume-on-restart** (KI-4): the supervisor captures the primary's session id from the life-tasks project dir and `--resume`s it on restart, falling back to a fresh launch on any miss (`launchPrimaryWindow`).
+  - ✅ **Created-instance session capture** (KI-1): a session-less created instance now polls for the new transcript it writes, matches it by cwd, and adopts its session id locally; the controller folds it into master tracking first-write-wins — so crash-recovery / restart resume *with* context instead of starting fresh.
+  - ⏳ Remaining: **before-logon service** (vs the logon-startup above); **bidirectional `.claude` settings sync** (changes anywhere propagate — credential-sensitive, design pending); **make all sessions remote-control** (scope pending).
   - ⏭️ Deferred: heterogeneous OS (Linux/macOS workhorses).
 
 ## Operating quick-reference
@@ -47,11 +49,46 @@ for the full design and its codicils.
 
 ## Known issues / future work
 
-- **KI-1 — created instances don't capture a sessionId (crash-loop now fixed).** A `create`d instance records no `sessionId`. Previously, relaunching it ran `claude --resume undefined`, which built a malformed `ArgumentList` and **crash-looped** (seen in `log10` on `wh-local`). **Fixed:** a session-less instance now relaunches as a *fresh* window (`launchInstance` falls back to `createNewInstance`), and the launch helper drops empty argv tokens. **Still deferred:** capturing the new window's session id so a created instance can be *resumed with its context* and so `hide`/`foreground` track a real window.
+- **KI-1 — created-instance session capture (RESOLVED 2026-06-16).** A `create`d instance starts with no `sessionId`; on recovery it relaunched *fresh*, losing all conversation history accumulated since creation (the confirmed root cause of "recovery loses history" for created instances — seen live as the `inst-dtest` record with `sessionId: null`). **Fixed (commit `69e95f1`):** `createInstance` snapshots known session ids before launch, then `_captureCreatedSession` polls (fire-and-forget, ~24 s) for the new transcript, identifies it by cwd match, and stores its id locally via `updateInstance`; the next `STATE_UPDATE` carries it to the controller, which folds it first-write-wins (`hub.js`). The earlier crash-loop guard (session-less → fresh window via `createNewInstance`; helper drops empty argv tokens) remains as the safety net for instances whose capture misses.
 - **KI-2 — cross-machine adoption: id-resolution fixed; full path still to confirm.** A truncated session id (the primary adopting `de9066ff` instead of the full id) caused "Session not found on disk" even for a listed session. Adoption now resolves a unique prefix to the full id (`resolveSessionId`). A complete cross-machine adoption (launch + first report on a remote workhorse) still needs a live end-to-end run, and is gated by KI-1.
 - **KI-5 — closing the server doesn't close the primary surface (deferred).** Ctrl+C on the controller window triggers a shutdown that taskkills the primary, but killing only the server process (which the supervisor then restarts) leaves the primary open. Deferred — the server is slated to become a Windows service, which reshapes lifecycle/teardown anyway.
 - **KI-3 — boot persistence: logon-startup added; before-logon pending.** `scripts/install-startup.ps1` auto-starts Execkee at logon (no admin). A before-logon Windows **service / scheduled task** (runs without an interactive session) is still pending.
-- **KI-4 — resilience: dead-detection added; primary-resume pending.** The hub now drops silent/dead workhorse connections via heartbeat (~90s). **Primary resume-on-restart** is designed but not shipped — it changes the high-blast-radius primary launch and needs a window-launch restart to verify, so it's deferred to a session where it can be confirmed live (a safe fallback-to-fresh design is planned: capture the primary's session id from the life-tasks project dir, `--resume` it on restart, fall back to a fresh launch on any miss).
+- **KI-4 — resilience: dead-detection + primary-resume both shipped.** The hub drops silent/dead workhorse connections via heartbeat (~90s). **Primary resume-on-restart** is implemented (commit `a55c633`): `launchPrimaryWindow` captures the primary's session id from the life-tasks project dir and `--resume`s it across restarts, falling back to a fresh seeded launch on any miss.
+
+## Bug review — "session finding" + "recovery loses history" (2026-06-16)
+
+A rigorous review of two reported bugs. Method: empirical (live process/transcript
+inspection + a headless and an interactive `--resume` test), no destructive changes.
+
+**Bug A — "can't find sessions where the tokens aren't loaded."** Not a filtering
+bug. `listLocalSessions` enumerates *every* `.jsonl` one level under each
+`~/.claude/projects/<slug>` with no size/content/"token" filter; subagent
+transcripts (nested under `subagents/`) are correctly excluded. The real cause is
+**topology/connectivity**: `hub.listSessions()` fans out only to *connected*
+workhorses, so (a) a session on the brain-only controller's own machine is never
+enumerated (no local workhorse to ask), and (b) a workhorse that is momentarily
+disconnected (heartbeat reconnect) yields an empty list. The CLI already prints
+"No workhorses connected" / per-host "(could not list: …)". *Recommended follow-up
+(not yet done):* also surface the controller-local sessions, and a per-host count.
+
+**Bug B — "recovery loses history since initial adopt."** Two distinct paths:
+  - **Created instances (root cause, FIXED):** a created instance had no `sessionId`,
+    so crash/restart recovery relaunched it as a *fresh* session — total history loss.
+    Confirmed live (`inst-dtest`, `sessionId: null`). Fixed by KI-1 (`69e95f1`).
+  - **Adopted instances (recovery is correct):** `_launchAndMonitor` relaunches with
+    the stored `sessionId`, the session's own cwd (`projectPath` = `getSessionCwd`),
+    and the stored `skipPermissions`. `claude --resume <id>` (no `--fork-session`)
+    **continues** the same session — verified headless (recalled a planted codeword;
+    same session id, no fork) and the 9 live managed instances all resume valid ids.
+    An interactive `--resume` launch created **no** fork file either (forking is
+    governed by `--fork-session`, which we never pass).
+  - **Secondary (not history loss):** instances adopted *without* `--full-permissions`
+    relaunch without `--dangerously-skip-permissions` (all but one live instance had
+    `skipPermissions: null`) and will block at permission prompts on recovery — which
+    can *look* like "recovery isn't working." Per-instance choice at adopt time;
+    *recommended follow-up:* pre-trust an adopted instance's folder on the workhorse
+    (as the primary already does) so a recovered window isn't stuck behind a trust
+    prompt.
 
 ## Verified this session
 
@@ -62,3 +99,4 @@ for the full design and its codicils.
 - Heartbeat dead-detection: a deliberately silent client was dropped by the hub after ~3 intervals.
 - `resolveSessionId('de9066ff')` → full id (short-id adoption); session-less launch no longer crash-loops (regenerated helper parses clean).
 - Boot-startup installer: parses clean; `-Uninstall` runs with no side effects.
+- **2026-06-16:** Resolved a stash-pop conflict in `instances.js` (KI-1) — `node --check` clean across all core source files, no leftover conflict markers. `listLocalSessions` enumerates all 44 real sessions in the repo project (no filtering bug). Headless `claude --resume <id>` recalled a planted codeword and produced no fork; an interactive `--resume` produced no fork file. Live: 9 managed instances resuming valid session ids; `inst-dtest` confirmed as the session-less (history-losing) created instance KI-1 addresses.
