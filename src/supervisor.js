@@ -26,7 +26,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 10;
+const BRIEF_VERSION = 11;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -448,7 +448,13 @@ After updating the task store and running \`refresh-tasks\`:
 - read the current sentence / \`${join(config.SHARED_STORE_DIR, 'cycle-report.json')}\`
   and judge whether this completion **resolves the displayed issue** — if so, \`resolve\` it;
 - scan the **presumed tasks** (action items surfaced from managed instances) for the
-  same item — the thing the user finished is often one an instance flagged.
+  same item — the thing the user finished is often one an instance flagged;
+- **check the tracked source docs.** Every time ANY task is marked complete —
+  whether it began as a tentative guess or a confirmed task — look at TRACKING.md and
+  the files in \`${config.CONTEXT_SOURCES_FILE}\` (e.g. a life-tasks **.docx**). If the
+  completed item appears in one, **update that doc** so the source of truth reflects
+  it's done and won't keep re-surfacing it. If a doc can't be edited directly, record
+  the completion in TRACKING.md so the next cycle's guess accounts for it.
 
 ## Keep a tracking log (TRACKING.md)
 

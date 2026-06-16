@@ -95,8 +95,8 @@ export async function runCoworkCycle(hub) {
       ? { id: sentenceQueue.major.id, text: sentenceQueue.major.text, priority: 1 }
       : null,
     standby: !sentenceQueue.major,
-    dailyTasks: plan.items,
-    coverageTasks: plan.items.filter(i => !i.instance),
+    dailyTasks: planTodayItems(plan.items),
+    coverageTasks: planHorizonCoverage(plan.items),
     presumedTasks: cycleReport.presumedTasks || [],
     instanceStatus: instances
       .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
@@ -210,10 +210,14 @@ function archiveCompleted(prevPlan) {
 async function guessTasksFromTrackedFiles({ contextBlock, today }) {
   if (!contextBlock || !contextBlock.trim()) return [];
   const prompt = [
-    "Infer a TENTATIVE list of the user's tasks for today from their tracked files below.",
-    'These are GUESSES the user will review and approve — be concrete and conservative;',
-    'propose only work the files actually support, and do NOT restate routine/standing notes.',
-    'Output ONLY valid JSON: {"tasks":[{"text":"...","due":null,"priority":"normal"}]} (max ~8 items, no commentary).',
+    "Infer the user's tasks from their tracked files below — the FULL horizon you can",
+    'support (everything the files imply still needs doing), not just today. These are',
+    'GUESSES the user will review and approve — be concrete and conservative; propose only',
+    'work the files actually support, and do NOT restate routine/standing notes.',
+    'Set "today": true ONLY for tasks realistically achievable today (a small, sensible',
+    "day's worth); set false for the rest of the horizon.",
+    'Output ONLY valid JSON: {"tasks":[{"text":"...","due":null,"priority":"normal","today":false}]}',
+    '(up to ~25 items, no commentary).',
     '',
     '=== TRACKED FILES ===',
     contextBlock,
@@ -230,6 +234,7 @@ async function guessTasksFromTrackedFiles({ contextBlock, today }) {
       status: 'pending',
       source: 'guess',
       tentative: true,
+      today: !!t.today,
       instance: null,
       complete: false,
       inProgress: false,
@@ -287,10 +292,16 @@ function rebuildPlanSync(today, instances) {
   return plan;
 }
 
+// "Your Tasks" = confirmed backlog + today's tentative slice (a day's worth).
+// "Tracked · no instance" = the REST of the guessed horizon with no instance — the
+// full inferred backlog beyond today. Disjoint by the `today` flag, so no repeats.
+function planTodayItems(items) { return items.filter(i => i.source !== 'guess' || i.today); }
+function planHorizonCoverage(items) { return items.filter(i => i.source === 'guess' && !i.today && !i.instance); }
+
 function writePlanToDashboard(plan) {
   const data = readDashboardData();
-  data.dailyTasks = plan.items;
-  data.coverageTasks = plan.items.filter(i => !i.instance);
+  data.dailyTasks = planTodayItems(plan.items);
+  data.coverageTasks = planHorizonCoverage(plan.items);
   data.updatedBy = 'task-refresh';
   writeDashboardData(data);
 }

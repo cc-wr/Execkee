@@ -247,14 +247,13 @@
         return `<div class="${cls.join(' ')}"><span class="check"></span><span class="ttext">${esc(t.text)}</span>${chip}</div>`;
       }).join('') : '<div class="empty">No tasks today.</div>';
 
-      // coverage: tracked tasks with no instance, MINUS anything already shown in
-      // "Your Tasks" (matched by text, tentative included) so nothing repeats.
-      const dailyKeys=new Set((data.dailyTasks||[]).map(t=>(t.text||'').toLowerCase().trim()));
-      const cov=(data.coverageTasks||[]).filter(t=>!dailyKeys.has((t.text||'').toLowerCase().trim()));
+      // coverage: the rest of the guessed horizon (no instance, not today's slice).
+      // Already disjoint from "Your Tasks" at the data layer, so render directly.
+      const cov=data.coverageTasks||[];
       document.getElementById('covlist').innerHTML = cov.length ? cov.map(t=>{
         const tag=t.tentative?'<span class="chip tentative">tentative</span>':'';
         return `<div class="pitem"><span class="pbullet">▸</span><span class="ptext">${esc(t.text)}</span>${tag}</div>`;
-      }).join('') : '<div class="empty">Nothing tracked outside your task list.</div>';
+      }).join('') : '<div class="empty">No tracked tasks beyond today.</div>';
 
       // instance count (header indicator; the per-instance panel was removed)
       const insts=data.instanceStatus||[];
