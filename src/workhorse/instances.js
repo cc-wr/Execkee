@@ -1,6 +1,6 @@
 import { readTracking, writeTracking, createInstanceRecord, addInstance, updateInstance, getInstancesForWorkhorse } from '../common/tracking.js';
 import { DESIRED_STATE, VISIBILITY, maxDesiredState } from '../common/protocol.js';
-import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd, resolveSessionId } from './reporter.js';
+import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd, resolveSessionId, listLocalSessions } from './reporter.js';
 import * as adapter from './adapter-win.js';
 import config from '../common/config.js';
 
@@ -53,6 +53,12 @@ export class InstanceManager {
   }
 
   createInstance({ id, name, sessionId, projectPath }) {
+    // KI-1: a freshly-created (session-less) instance writes a NEW transcript on
+    // disk once it starts. Snapshot the existing session ids BEFORE launch so we
+    // can later identify the new one and adopt it as this instance's sessionId —
+    // making crash-recovery resume WITH context instead of starting fresh.
+    const knownSessionIds = sessionId ? null : new Set(listLocalSessions().map(s => s.sessionId));
+
     // Atomic: launch first, and only persist the record once we have a live pid.
     const launched = sessionId
       ? adapter.launchInstance(id, sessionId, projectPath)
@@ -77,7 +83,46 @@ export class InstanceManager {
     writeTracking(tracking);
     this._applyVisibility(record.windowHandle, record.visibility);
     this._startMonitor(id);
+    // Fire-and-forget: don't block the CREATE ack on the capture poll.
+    if (knownSessionIds) this._captureCreatedSession(id, projectPath, knownSessionIds);
     return { success: true, instance: record };
+  }
+
+  // KI-1: poll for the transcript a just-created instance writes, and adopt its
+  // session id once it appears. The new session is the one that (a) wasn't on
+  // disk before launch and (b) runs from this instance's projectPath. Stored
+  // locally so workhorse-side relaunch resumes with context; the next state
+  // update then carries it to the controller (folded first-write-wins).
+  _captureCreatedSession(instanceId, projectPath, knownSessionIds) {
+    const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    const target = norm(projectPath);
+    let attempts = 0;
+    const MAX_ATTEMPTS = 12; // ~24s at 2s intervals — the window-handle poll alone can take ~12s
+    const tick = () => {
+      attempts++;
+      let found = null;
+      for (const s of listLocalSessions()) { // newest-first
+        if (knownSessionIds.has(s.sessionId)) continue;
+        const cwd = getSessionCwd(s.sessionId);
+        if (cwd && norm(cwd) === target) { found = s.sessionId; break; }
+      }
+      if (found) {
+        const tracking = readTracking();
+        const inst = tracking.instances[instanceId];
+        if (inst && !inst.sessionId) {
+          updateInstance(tracking, instanceId, { sessionId: found });
+          writeTracking(tracking);
+          console.log(`[instances] captured session ${found} for created instance ${instanceId}`);
+        }
+        return;
+      }
+      if (attempts < MAX_ATTEMPTS) {
+        setTimeout(tick, 2000);
+      } else {
+        console.warn(`[instances] could not capture a session id for created instance ${instanceId} (will start fresh on relaunch)`);
+      }
+    };
+    setTimeout(tick, 2000);
   }
 
   manageExisting({ id, name, sessionId, projectPath, baseline, alreadyOpen, skipPermissions }) {

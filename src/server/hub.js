@@ -216,6 +216,10 @@ export class Hub {
       for (const f of WH_OWNED) {
         if (r[f] !== undefined) cur[f] = r[f];
       }
+      // KI-1: first-write-wins for sessionId. A created instance starts with no
+      // session id; the workhorse discovers the real one and reports it. Adopt it
+      // only when the master has none — never overwrite an existing identity.
+      if (!cur.sessionId && r.sessionId) cur.sessionId = r.sessionId;
       if (r.projectPath && r.projectPath !== cur.projectPath) cur.projectPath = r.projectPath;
       cur.desiredState = maxDesiredState(cur.desiredState, r.desiredState);
       changed = true;
