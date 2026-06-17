@@ -384,6 +384,40 @@ switch (cmd) {
     break;
   }
 
+  case 'schedule-guess': {
+    // schedule-guess <text...> --on YYYY-MM-DD [--until YYYY-MM-DD] [--horizon]
+    let on = null, until = null, horizon = false;
+    const textParts = [];
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a === '--on') on = args[++i] || null;
+      else if (a === '--until') until = args[++i] || null;
+      else if (a === '--horizon') horizon = true;
+      else textParts.push(a);
+    }
+    const text = textParts.join(' ').trim();
+    if (!text || !on) { console.log('Usage: schedule-guess "<text>" --on YYYY-MM-DD [--until YYYY-MM-DD] [--horizon]'); break; }
+    const result = await api('/api/schedule-guess', 'POST', { text, on, until, horizon });
+    console.log(result.success !== false ? `Scheduled guess "${text}" starting ${on}${until ? ` until ${until}` : ''}${horizon ? ' (horizon)' : ''}.` : `Failed: ${result.error}`);
+    break;
+  }
+
+  case 'unschedule-guess': {
+    const id = args.join(' ').trim();
+    if (!id) { console.log('Usage: unschedule-guess <id|text>'); break; }
+    const result = await api('/api/unschedule-guess', 'POST', { id });
+    console.log(result.success !== false ? 'Scheduled guess removed.' : `Failed: ${result.error}`);
+    break;
+  }
+
+  case 'scheduled-guesses': {
+    const result = await api('/api/scheduled-guesses');
+    const list = result.items || [];
+    if (!list.length) { console.log('(no scheduled guesses)'); break; }
+    for (const s of list) console.log(`  ${s.id}  ${s.text}  (from ${s.startDate}${s.until ? ` until ${s.until}` : ''}${s.today === false ? ', horizon' : ''})`);
+    break;
+  }
+
   case 'sessions': {
     // Adoptable sessions live on EACH workhorse (its own ~/.claude/projects);
     // the controller aggregates them and tags which are already managed.
@@ -430,6 +464,9 @@ switch (cmd) {
     console.log('  defer "<topic>" [--until YYYY-MM-DD]  Put a topic on hold — its instance-surfaced tasks stop appearing');
     console.log('  undefer <id|topic>         Lift a deferral (items return next cycle)');
     console.log('  deferrals                  List active deferrals');
+    console.log('  schedule-guess "<text>" --on YYYY-MM-DD [--until YYYY-MM-DD] [--horizon]  Surface a task as a guess starting on a date');
+    console.log('  unschedule-guess <id|text> Remove a scheduled guess');
+    console.log('  scheduled-guesses          List scheduled guesses');
     console.log('  sessions [--all]           Adoptable sessions per workhorse (--all incl. managed)');
     console.log('  issue add <text>           Log an Execkee improvement/bug to the backlog');
     console.log('  issue [all]                List open (or all) backlog issues');

@@ -107,6 +107,16 @@ export function writeDeferrals(data) {
   writeJson(config.DEFERRALS_FILE, data);
 }
 
+// --- Scheduled guesses (tasks the user wants surfaced as a guess on/after a date) ---
+
+export function readScheduledGuesses() {
+  return readJson(config.SCHEDULED_GUESSES_FILE, { items: [] });
+}
+
+export function writeScheduledGuesses(data) {
+  writeJson(config.SCHEDULED_GUESSES_FILE, data);
+}
+
 // --- Resolutions ---
 
 export function readResolutions() {

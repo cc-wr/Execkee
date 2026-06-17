@@ -79,6 +79,24 @@ dashboard.onListDeferrals = async () => {
   return listDeferrals();
 };
 
+// Scheduled guesses: surface a user-specified task as a tentative guess on a date.
+dashboard.onScheduleGuess = async ({ text, on, until, horizon }) => {
+  const { addScheduledGuess } = await import('../cowork.js');
+  const result = addScheduledGuess(text, on, until, !horizon);
+  dashboard.pushUpdate();
+  return result;
+};
+dashboard.onUnscheduleGuess = async (id) => {
+  const { removeScheduledGuess } = await import('../cowork.js');
+  const result = removeScheduledGuess(id);
+  dashboard.pushUpdate();
+  return result;
+};
+dashboard.onListScheduledGuesses = async () => {
+  const { listScheduledGuesses } = await import('../cowork.js');
+  return listScheduledGuesses();
+};
+
 // Force a fresh tracked-file task guess now (doesn't wait for the daily rollover).
 dashboard.onRegenerateGuesses = async () => {
   const { regenerateGuesses } = await import('../cowork.js');

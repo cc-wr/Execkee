@@ -10,6 +10,7 @@ import {
   readDailyPlan, writeDailyPlan,
   readDailyPlanArchive, writeDailyPlanArchive,
   readDeferrals, writeDeferrals,
+  readScheduledGuesses, writeScheduledGuesses,
 } from './common/store.js';
 import { DESIRED_STATE, VISIBILITY, CMD } from './common/protocol.js';
 import { readContextSources } from './common/context-sources.js';
@@ -267,6 +268,7 @@ async function buildDailyPlan({ today, lifeTasks, instances, contextBlock, force
   } else {
     guesses = (prev.items || []).filter(i => i.source === 'guess');
   }
+  guesses = withScheduledGuesses(guesses, today);
   const backlogTexts = new Set(backlogItems.map(i => normText(i.text)));
   guesses = guesses
     .map(g => ({ ...g, instance: matchInstance(g.text, instanceNames) }))
@@ -287,6 +289,7 @@ function rebuildPlanSync(today, instances) {
   const prev = readDailyPlan();
   const backlogItems = backlogToPlanItems(lifeTasks, today, instanceNames);
   let guesses = prev.date === today ? (prev.items || []).filter(i => i.source === 'guess') : [];
+  guesses = withScheduledGuesses(guesses, today);
   const backlogTexts = new Set(backlogItems.map(i => normText(i.text)));
   guesses = guesses
     .map(g => ({ ...g, instance: matchInstance(g.text, instanceNames) }))
@@ -332,6 +335,7 @@ export function approveTask(id) {
   const item = (plan.items || []).find(i => i.id === id && i.tentative);
   if (!item) return { success: false, error: `No tentative task with id ${id}` };
   promoteToBacklog([item]);
+  if (item.scheduledId) removeScheduledGuess(item.scheduledId); // consumed — don't re-inject
   const p = rebuildPlanSync(today, Object.values(readTracking().instances));
   writePlanToDashboard(p);
   return { success: true, promoted: item.text };
@@ -343,6 +347,7 @@ export function approveAllTentative() {
   const tentatives = (plan.items || []).filter(i => i.tentative);
   if (!tentatives.length) return { success: true, approved: 0 };
   promoteToBacklog(tentatives);
+  for (const t of tentatives) if (t.scheduledId) removeScheduledGuess(t.scheduledId);
   const p = rebuildPlanSync(today, Object.values(readTracking().instances));
   writePlanToDashboard(p);
   return { success: true, approved: tentatives.length };
@@ -351,9 +356,10 @@ export function approveAllTentative() {
 export function rejectTask(id) {
   const today = localDateStr();
   const plan = readDailyPlan();
-  const before = (plan.items || []).length;
+  const item = (plan.items || []).find(i => i.id === id && i.tentative);
+  if (!item) return { success: false, error: `No tentative task with id ${id}` };
+  if (item.scheduledId) removeScheduledGuess(item.scheduledId); // stop it re-injecting
   plan.items = (plan.items || []).filter(i => !(i.id === id && i.tentative));
-  if (plan.items.length === before) return { success: false, error: `No tentative task with id ${id}` };
   writeDailyPlan(plan);
   const p = rebuildPlanSync(today, Object.values(readTracking().instances));
   writePlanToDashboard(p);
@@ -462,6 +468,60 @@ export function removeDeferral(idOrTopic) {
 
 export function listDeferrals() {
   return readDeferrals().deferrals || [];
+}
+
+// ---- Scheduled guesses: surface a user-specified task as a tentative guess on a date ----
+
+function activeScheduledGuesses(today) {
+  const { items } = readScheduledGuesses();
+  return (items || []).filter(e => e && e.text && e.startDate && e.startDate <= today && (!e.until || e.until >= today));
+}
+
+// Merge active scheduled guesses into a guess list (deduped by text). They look like
+// any other tentative guess but carry scheduledId so approve/reject can clear them.
+function withScheduledGuesses(guesses, today) {
+  const active = activeScheduledGuesses(today);
+  if (!active.length) return guesses || [];
+  const seen = new Set((guesses || []).map(g => normText(g.text)));
+  const inject = active
+    .filter(e => !seen.has(normText(e.text)))
+    .map(e => ({
+      id: e.id, text: e.text, due: null, priority: e.priority || 'normal',
+      status: 'pending', source: 'guess', tentative: true, today: e.today !== false,
+      instance: null, complete: false, inProgress: false, scheduledId: e.id,
+    }));
+  return [...(guesses || []), ...inject];
+}
+
+export function addScheduledGuess(text, startDate, until, today) {
+  text = String(text || '').trim();
+  if (!text) return { success: false, error: 'empty text' };
+  if (!startDate) return { success: false, error: 'startDate required (--on YYYY-MM-DD)' };
+  const data = readScheduledGuesses();
+  data.items = data.items || [];
+  const id = `sg-${Date.now().toString(36)}`;
+  data.items.push({ id, text, startDate, until: until || null, today: today !== false, priority: 'normal', createdAt: new Date().toISOString() });
+  writeScheduledGuesses(data);
+  // If it's already due, surface it on the dashboard right away (else it appears when its date arrives).
+  const t = localDateStr();
+  if (startDate <= t) {
+    const p = rebuildPlanSync(t, Object.values(readTracking().instances));
+    writePlanToDashboard(p);
+  }
+  return { success: true, id, text, startDate, until: until || null };
+}
+
+export function removeScheduledGuess(idOrText) {
+  const key = normText(idOrText);
+  const data = readScheduledGuesses();
+  const before = (data.items || []).length;
+  data.items = (data.items || []).filter(e => e.id !== idOrText && normText(e.text) !== key);
+  writeScheduledGuesses(data);
+  return { success: data.items.length < before };
+}
+
+export function listScheduledGuesses() {
+  return readScheduledGuesses().items || [];
 }
 
 // Force a fresh tentative-task guess from the tracked files NOW, without waiting for

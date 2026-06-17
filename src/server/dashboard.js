@@ -25,6 +25,9 @@ export class DashboardServer {
     this.onDefer = null; // set by index.js; add a structured deferral
     this.onUndefer = null; // set by index.js; remove a deferral
     this.onListDeferrals = null; // set by index.js; list active deferrals
+    this.onScheduleGuess = null; // set by index.js; schedule a future guessed task
+    this.onUnscheduleGuess = null; // set by index.js; remove a scheduled guess
+    this.onListScheduledGuesses = null; // set by index.js; list scheduled guesses
   }
 
   start() {
@@ -107,6 +110,18 @@ export class DashboardServer {
 
     if (url.pathname === '/api/deferrals') {
       return this._handleApiDeferrals(req, res);
+    }
+
+    if (url.pathname === '/api/schedule-guess' && req.method === 'POST') {
+      return this._handleApiScheduleGuess(req, res);
+    }
+
+    if (url.pathname === '/api/unschedule-guess' && req.method === 'POST') {
+      return this._handleApiUnscheduleGuess(req, res);
+    }
+
+    if (url.pathname === '/api/scheduled-guesses') {
+      return this._handleApiScheduledGuesses(req, res);
     }
 
     if (url.pathname === '/' || url.pathname === '/index.html') {
@@ -350,6 +365,53 @@ export class DashboardServer {
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ deferrals: [], error: err.message }));
+    }
+  }
+
+  async _handleApiScheduleGuess(req, res) {
+    const body = await this._readBody(req);
+    if (!this.onScheduleGuess) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'No schedule-guess wired' }));
+      return;
+    }
+    try {
+      const { text, on, until, horizon } = JSON.parse(body || '{}');
+      const result = await this.onScheduleGuess({ text, on: on || null, until: until || null, horizon: !!horizon });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  async _handleApiUnscheduleGuess(req, res) {
+    const body = await this._readBody(req);
+    if (!this.onUnscheduleGuess) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'No unschedule-guess wired' }));
+      return;
+    }
+    try {
+      const { id } = JSON.parse(body || '{}');
+      const result = await this.onUnscheduleGuess(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  async _handleApiScheduledGuesses(req, res) {
+    try {
+      const items = this.onListScheduledGuesses ? await this.onListScheduledGuesses() : [];
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ items }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ items: [], error: err.message }));
     }
   }
 

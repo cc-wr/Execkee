@@ -26,7 +26,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 13;
+const BRIEF_VERSION = 14;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -391,6 +391,8 @@ Two different "stop" actions — choose by what the user means:
 - \`defer "<topic>" [--until YYYY-MM-DD]\` — put a topic on hold; the cycle then suppresses its related **instance-surfaced (presumed) tasks** and sentences (until the date, if given)
 - \`undefer <id|topic>\` — lift a deferral (related items return next cycle)
 - \`deferrals\` — list active deferrals
+- \`schedule-guess "<text>" --on YYYY-MM-DD [--until YYYY-MM-DD] [--horizon]\` — surface a task as a tentative **guess** starting on a date (then it flows through approve/reject); \`--horizon\` puts it in the "Tracked · no instance" panel instead of today's tentatives
+- \`unschedule-guess <id|text>\` / \`scheduled-guesses\` — remove / list scheduled guesses
 - \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open] [--full-permissions]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default. \`--full-permissions\` runs it unattended (skips approval prompts).
 - \`create "<name>" [path] [--on <workhorse-id>]\` — new managed instance (on a chosen machine)
 - \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close (shuts the window; the session stays re-adoptable)
@@ -477,6 +479,22 @@ and can slip through — so **always run \`defer\` for an actual hold**, and als
 context in TRACKING.md if it's useful. To bring a topic back: \`undefer <id|topic>\`
 (\`deferrals\` lists what's active). Keep the topic phrase close to how it appears in the
 surfaced items so the match catches them.
+
+## Scheduling a future guess
+
+When the user wants a task to show up **later** — "next week, have <X> as a guessed
+task", "remind me to consider <X> on <date>", "schedule <X> as a guess for <when>" —
+work out the concrete date (YYYY-MM-DD; e.g. "next week" = +7 days from today) and run:
+
+\`\`\`
+node "${CLI}" schedule-guess "<X>" --on <date> [--until <date>]
+\`\`\`
+
+On/after that date it surfaces as a **tentative guess** in the plan; you then present
+it and the user approves (\`approve-task\`) or rejects (\`reject-task\`) it like any guess —
+which also clears the schedule. Add \`--horizon\` to put it in the "Tracked · no instance"
+panel instead of today's tentatives. \`scheduled-guesses\` lists what's pending;
+\`unschedule-guess <id|text>\` cancels one before it fires.
 
 ## Keep a tracking log (TRACKING.md)
 
