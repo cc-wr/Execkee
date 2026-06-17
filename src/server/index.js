@@ -64,7 +64,7 @@ dashboard.onRejectTask = async (id) => {
 // Structured deferrals: a deferred topic's related presumed tasks are suppressed.
 dashboard.onDefer = async ({ topic, until }) => {
   const { addDeferral } = await import('../cowork.js');
-  const result = addDeferral(topic, until);
+  const result = await addDeferral(topic, until);
   dashboard.pushUpdate();
   return result;
 };

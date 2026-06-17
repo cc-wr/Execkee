@@ -99,7 +99,7 @@ export async function runCoworkCycle(hub) {
     standby: !sentenceQueue.major,
     dailyTasks: planTodayItems(plan.items),
     coverageTasks: planHorizonCoverage(plan.items),
-    presumedTasks: filterDeferredPresumed(cycleReport.presumedTasks || [], today),
+    presumedTasks: await filterDeferredPresumed(cycleReport.presumedTasks || [], today),
     instanceStatus: instances
       .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
       .map(i => ({
@@ -393,15 +393,48 @@ function isDeferred(text, defs) {
   return false;
 }
 
-// Drop presumed tasks that relate to an active deferral. Applied to BOTH the LLM and
-// fallback presumed-task sets, so a deferred topic's items leave the panel for sure.
-function filterDeferredPresumed(presumed, today) {
-  const defs = activeDeferrals(today);
-  if (!defs.length) return presumed || [];
-  return (presumed || []).filter(p => !isDeferred(p.text, defs));
+// LLM relatedness check (rigorous): one batched fork judges, by MEANING, which
+// candidate items relate to a deferred topic. Returns a Set of ids to suppress, or
+// null to signal "fall back to the text match" (call failed / unparseable).
+async function llmDeferralSuppress(items, defs) {
+  const prompt = [
+    'The user has DEFERRED these topics (put them on hold):',
+    ...defs.map(d => `- ${d.topic}${d.until ? ` (until ${d.until})` : ''}`),
+    '',
+    'Candidate action items (id: text):',
+    ...items.map(p => `- ${p.id}: ${p.text}`),
+    '',
+    'For EACH candidate, decide whether it is about / related to any deferred topic —',
+    'the same subject, project, person, deliverable, or obligation the user put on hold.',
+    'Judge by MEANING, not shared words (a paraphrase still counts; an unrelated item',
+    'that happens to share a word does NOT). Output ONLY JSON: {"suppress":["id",...]}',
+    'listing the ids to HIDE because they relate to a deferred topic. If none, {"suppress":[]}.',
+  ].join('\n');
+  try {
+    const parsed = parseSynthesis(await claudeRun(['-p', '--output-format', 'json', prompt]));
+    if (!parsed || !Array.isArray(parsed.suppress)) return null;
+    return new Set(parsed.suppress.map(String));
+  } catch (err) {
+    console.error('[cowork] LLM deferral check failed:', err.message);
+    return null;
+  }
 }
 
-export function addDeferral(topic, until) {
+// Drop presumed tasks that relate to an active deferral. LLM-first (semantic), with
+// the text match (isDeferred) only as a fallback when the model call is unavailable.
+// Applied to BOTH the LLM and fallback presumed-task sets so deferred items leave the
+// panel for sure.
+async function filterDeferredPresumed(presumed, today) {
+  const list = presumed || [];
+  const defs = activeDeferrals(today);
+  if (!defs.length || !list.length) return list;
+  const suppress = await llmDeferralSuppress(list, defs);
+  if (suppress) return list.filter(p => !suppress.has(String(p.id)));
+  // Model unavailable/unparseable — best-effort text match so suppression still happens.
+  return list.filter(p => !isDeferred(p.text, defs));
+}
+
+export async function addDeferral(topic, until) {
   topic = String(topic || '').trim();
   if (!topic) return { success: false, error: 'empty topic' };
   const data = readDeferrals();
@@ -412,7 +445,7 @@ export function addDeferral(topic, until) {
   // Drop now-deferred presumed tasks from the dashboard immediately (don't wait a cycle).
   const today = localDateStr();
   const dash = readDashboardData();
-  dash.presumedTasks = filterDeferredPresumed(dash.presumedTasks, today);
+  dash.presumedTasks = await filterDeferredPresumed(dash.presumedTasks, today);
   writeDashboardData(dash);
   return { success: true, id, topic, until: until || null };
 }
