@@ -133,6 +133,9 @@
     .chip.tentative { background: rgba(120,130,150,0.18); color: var(--muted); border: 0.2vmin dashed var(--gray); }
     .titem.tentative { opacity: 0.8; }
     .titem.tentative .check { border-style: dashed; }
+    .chip.prio-high { background: rgba(214,59,48,0.18); color: var(--red); }
+    .chip.prio-normal { background: rgba(91,107,128,0.14); color: var(--muted); }
+    .chip.prio-low { background: rgba(120,130,150,0.10); color: var(--muted); }
 
     /* --- Instances --- */
     .inst { display: flex; align-items: center; gap: 1.4vmin; font-size: 2vmin; padding: 0.5vmin 0; }
@@ -256,7 +259,9 @@
           else if(t.status==='due-today')chip='<span class="chip due-today">today</span>';
           else if(t.inProgress)chip='<span class="chip inprogress">in progress</span>';
         }
-        return `<div class="${cls.join(' ')}"><span class="check"></span><span class="ttext">${esc(t.text)}</span>${chip}</div>`;
+        const prio=t.priority||'normal';
+        const prioChip=t.complete?'':`<span class="chip prio-${prio}">${prio}</span>`;
+        return `<div class="${cls.join(' ')}"><span class="check"></span><span class="ttext">${esc(t.text)}</span>${prioChip}${chip}</div>`;
       }).join('') : '<div class="empty">No tasks today.</div>';
 
       // coverage: the rest of the guessed horizon (no instance, not today's slice).
@@ -264,7 +269,8 @@
       const cov=data.coverageTasks||[];
       document.getElementById('covlist').innerHTML = cov.length ? cov.map(t=>{
         const tag=t.tentative?'<span class="chip tentative">tentative</span>':'';
-        return `<div class="pitem"><span class="pbullet">▸</span><span class="ptext">${esc(t.text)}</span>${tag}</div>`;
+        const prio=t.priority||'normal';
+        return `<div class="pitem"><span class="pbullet">▸</span><span class="ptext">${esc(t.text)}</span><span class="chip prio-${prio}">${prio}</span>${tag}</div>`;
       }).join('') : '<div class="empty">No tracked tasks beyond today.</div>';
 
       // instance count (header indicator; the per-instance panel was removed)

@@ -163,11 +163,26 @@ function computeStatus(task, today) {
   return 'pending';
 }
 
+const PRIORITY_WEIGHT = { high: 4, normal: 2, low: 1 };
+
+// Weighted-random sort key (Efraimidis–Spirakis): higher priority biases toward the
+// top, but the randomness lets a low-priority guess occasionally surface near the top.
+function guessRank(priority) {
+  const w = PRIORITY_WEIGHT[priority] || 2;
+  return Math.pow(Math.random(), 1 / w);
+}
+
 function sortPlanItems(items) {
   const statusOrder = { overdue: 0, 'due-today': 1, pending: 2, complete: 3 };
   const prioOrder = { high: 0, normal: 1, low: 2 };
+  // Fresh weighted-random key per tentative guess on EVERY build, so the guess order
+  // reshuffles each ~30-min cycle (and on any rebuild). Keyed by item identity so the
+  // comparator stays consistent within this sort; nothing is persisted on the items.
+  const rank = new Map();
+  for (const it of items) if (it.tentative) rank.set(it, guessRank(it.priority));
   return items.slice().sort((a, b) => {
-    if (!!a.tentative !== !!b.tentative) return a.tentative ? 1 : -1; // tentative last
+    if (!!a.tentative !== !!b.tentative) return a.tentative ? 1 : -1; // tentative after confirmed
+    if (a.tentative && b.tentative) return (rank.get(b) ?? 0) - (rank.get(a) ?? 0); // weighted-random
     const sd = (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2);
     if (sd !== 0) return sd;
     return (prioOrder[a.priority] ?? 1) - (prioOrder[b.priority] ?? 1);
@@ -219,6 +234,8 @@ async function guessTasksFromTrackedFiles({ contextBlock, today }) {
     'work the files actually support, and do NOT restate routine/standing notes.',
     'Set "today": true ONLY for tasks realistically achievable today (a small, sensible',
     "day's worth); set false for the rest of the horizon.",
+    'Estimate each task\'s "priority" — high / normal / low — from how urgent and',
+    'important the files imply it is (deadlines, blockers, and explicit emphasis raise it).',
     'Output ONLY valid JSON: {"tasks":[{"text":"...","due":null,"priority":"normal","today":false}]}',
     '(up to ~25 items, no commentary).',
     '',
