@@ -194,7 +194,9 @@ function sortPlanItems(items) {
 // off — the daily reset). Each tagged with its by-name instance match.
 function backlogToPlanItems(lifeTasks, today, instanceNames) {
   return (lifeTasks.tasks || [])
-    .filter(t => !t.completedAt || String(t.completedAt).slice(0, 10) === today)
+    // Hide tasks scheduled to start LATER (startDate in the future) until their day
+    // arrives — an approved task can be queued in advance to show up not now but later.
+    .filter(t => (!t.completedAt || String(t.completedAt).slice(0, 10) === today) && !(t.startDate && t.startDate > today))
     .map(t => ({
       id: t.id,
       text: t.text,

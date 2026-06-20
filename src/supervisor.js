@@ -26,7 +26,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 15;
+const BRIEF_VERSION = 16;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -416,9 +416,17 @@ current findings and issue ids.
 This folder is the living task store. On "done with the taxes" / "add: renew
 passport" / "the billing thing now blocks the launch" / "I'm working on the
 launch checklist", edit \`${config.LIFE_TASKS_FILE}\` directly. Task JSON:
-\`{ "tasks": [ { "id", "text", "due", "priority", "completedAt", "inProgress" } ] }\`.
+\`{ "tasks": [ { "id", "text", "due", "priority", "completedAt", "inProgress", "startDate" } ] }\`.
 Set \`completedAt\` when done; set \`inProgress: true\` when the user starts working
 on a task (the dashboard donut shows completed / in-progress / not-done).
+
+**Schedule an approved task for later** with \`startDate\` (YYYY-MM-DD): the task stays
+**hidden** from the plan until that date, then appears as a normal **confirmed** task —
+no approval needed (it's already on the list, just dated forward). Use this when the
+user says "add X as a real task, but not until <date>" / "put X on my list starting
+<when>" / "I'll deal with X next month". (Different from \`schedule-guess\`, which
+surfaces a *tentative guess* to approve; \`startDate\` queues an *already-approved* task.)
+\`due\` is the deadline; \`startDate\` is when it first shows.
 
 **After EVERY task-store edit, immediately run \`refresh-tasks\`** so the dashboard
 reflects it at once — never make the user wait for the 30-minute cycle. (It just
