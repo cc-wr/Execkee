@@ -45,6 +45,32 @@ function isInteractivePrompt(frame) {
   return /do you want to (proceed|allow|continue|trust)|do you trust the files|(^|\n)\s*[❯>]?\s*\d+\.\s+(yes|no|allow|deny|always|don'?t ask)|yes, and don'?t ask again|press\s+\d|esc to (cancel|reject|go back)/i.test(frame);
 }
 
+// True if the user has text typed into the input box (a half-composed message).
+// CRITICAL: never inject while this is true, or the probe prompt is spliced into
+// the user's keystrokes. The active input box is the LAST line beginning with '>';
+// anything after the '>' means the user is composing. Errs toward "composing"
+// (skip) on ambiguity, which is the safe direction.
+function userComposing(frame) {
+  const lines = frame.split('\n').map(clean).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].startsWith('>')) continue;
+    const rest = lines[i].slice(1).trim();
+    if (!rest) return false;                         // empty input box
+    if (/^Try\s+["'‘“]/.test(rest)) return false;    // idle placeholder hint: Try "…"
+    return true;                                      // real user-typed text -> composing
+  }
+  return false;
+}
+
+// Frame normalized for the stability check: drop the volatile bottom chrome (status
+// bar, token counter, rotating tip) so a ticking counter doesn't prevent settling,
+// but KEEP the conversation + input box so active typing/rendering breaks stability.
+function idleStableNorm(frame) {
+  return frame.split('\n').map(clean)
+    .filter((l) => !/shift\+tab|bypass permissions|\btokens\b|for agents|auto-accept|to interrupt/i.test(l))
+    .join('\n').replace(/\n{2,}/g, '\n').trim();
+}
+
 // Lines after the last marker that are real content (not the input box / status
 // chrome). If none, the session hasn't advanced since that marker was printed.
 function hasNewContentAfter(frame, marker) {
@@ -161,29 +187,34 @@ export async function probeReport(inst, { lastMarker } = {}) {
     return { success: false, fallback: true, error: `cannot read console frame (${(first || '').trim() || 'empty'})` };
   }
 
-  // Wait until idle: the status bar is up (TUI ready) and it is NOT generating
-  // (no "esc to interrupt") for two consecutive samples. Robust to a welcome
-  // banner / rotating tip / cursor (which don't affect busy/ready), unlike exact
-  // frame-equality. A still-loading or working window never builds the streak.
+  // Settle to a genuinely-idle, user-not-interacting state before injecting:
+  //   - not generating (isBusy), TUI up (looksReady), not at a permission prompt;
+  //   - the input box is EMPTY — the user is not composing a message (NEVER inject
+  //     into half-typed input; this is the bug that spliced the probe prompt into
+  //     the user's keystrokes);
+  //   - the frame is UNCHANGED vs the previous sample (ignoring the volatile status
+  //     bar), so we don't inject while the user is actively typing or the model is
+  //     mid-render. Two identical idle frames => stable idle.
   let settled = null;
-  let readyStreak = 0;
+  let prevNorm = null;
   for (let i = 0; i < config.PROBE_SETTLE_SAMPLES; i++) {
     await sleep(config.PROBE_IDLE_SETTLE_MS);
     const cur = readFrame(pid);
     if (cur.startsWith('ATTACH_FAIL')) return { success: false, fallback: true, error: 'console detached mid-probe' };
-    if (isBusy(cur) || !looksReady(cur) || isInteractivePrompt(cur)) { readyStreak = 0; continue; }
-    readyStreak++;
-    settled = cur;
-    if (readyStreak >= 2) break;
+    const idleNow = !isBusy(cur) && looksReady(cur) && !isInteractivePrompt(cur) && !userComposing(cur);
+    const norm = idleStableNorm(cur);
+    if (idleNow && prevNorm !== null && norm === prevNorm) { settled = cur; break; }
+    prevNorm = idleNow ? norm : null; // reset the anchor whenever it isn't idle
   }
-  if (readyStreak < 2 || !settled) {
-    // Busy / awaiting-user are EXPECTED transient states — skip and retry next cycle.
-    // Anything else means the TUI never reached a recognizable ready state (not
-    // behaving as expected) — fall back to the fork report.
+  if (!settled) {
+    // Busy / awaiting-user / user-composing are EXPECTED transient states — skip and
+    // retry next cycle (never disturb a window the user is in). Anything else means
+    // the TUI never reached a stable idle state — fall back to the fork report.
     const cur = readFrame(pid);
     if (isBusy(cur)) return { success: false, skipped: true, reason: 'instance is mid-inference' };
     if (isInteractivePrompt(cur)) return { success: false, skipped: true, reason: 'instance is at an interactive prompt (permission/trust)' };
-    return { success: false, fallback: true, error: 'TUI never reached a ready state' };
+    if (userComposing(cur)) return { success: false, skipped: true, reason: 'user is composing input' };
+    return { success: false, fallback: true, error: 'TUI never reached a stable idle state' };
   }
   if (lastMarker && !hasNewContentAfter(settled, lastMarker)) return { success: false, unchanged: true };
 
