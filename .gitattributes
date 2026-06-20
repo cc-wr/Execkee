@@ -1,0 +1,5 @@
+# Line-ending policy for cross-platform checkouts.
+# Shell scripts MUST be LF: a CRLF in the shebang is a "bad interpreter" error on
+# macOS/Linux. PowerShell scripts stay CRLF (Windows convention; PS tolerates LF).
+*.sh text eol=lf
+*.ps1 text eol=crlf

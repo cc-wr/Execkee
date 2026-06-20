@@ -51,14 +51,32 @@ The dashboard opens at **http://localhost:7701**. Leave this window open; press
 
 ## Add a workhorse (machine 2+)
 
-On the other machine, with Execkee checked out:
+**Windows** — on the other machine, with Execkee checked out:
 
 ```powershell
 .\execkee-workhorse.ps1 -ControllerAddress <controller-host>:7700 -Name "Work-Laptop"
 ```
 
-It self-registers upward; the controller needs no configuration. (Real
-cross-machine behavior is Phase 1 — see §9 / Codicil A.10.)
+**macOS** — one-line install (portable Node + Claude Code, no admin), then it
+self-registers and starts:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cc-wr/Execkee/master/bootstrap.sh \
+  | bash -s -- --controller <controller-host>:7700 --name "Mac-Workhorse"
+```
+
+Day-2 starts are just `./execkee-workhorse.sh --controller <host>:7700`. To start it
+at login, `./scripts/install-startup.sh --controller <host>:7700` installs a per-user
+LaunchAgent (`--uninstall` removes it).
+
+> **macOS one-time permission:** the workhorse drives Terminal.app via AppleScript to
+> open/hide/show instance windows. The first time it does so, macOS asks *"… wants to
+> control Terminal.app"* — **click OK once, at the Mac's screen** (a headless/login-time
+> first run fails silently until approved). Run `./execkee-workhorse.sh` manually once and
+> approve it before relying on login-startup.
+
+It self-registers upward; the controller needs no configuration. The controller and
+primary surface run on Windows; a macOS machine joins as a **workhorse**.
 
 ## Driving it
 
@@ -122,16 +140,22 @@ life-tasks and on-disk Claude sessions are left intact.
 ## Layout
 
 ```
-execkee-controller.ps1   one-command controller launcher
-execkee-workhorse.ps1     one-command workhorse launcher (machine 2+)
+execkee-controller.ps1    one-command controller launcher (Windows)
+execkee-workhorse.ps1     one-command workhorse launcher (Windows, machine 2+)
+execkee-workhorse.sh      one-command workhorse launcher (macOS, machine 2+)
+bootstrap.ps1 / .sh       fresh-machine installers (Windows / macOS workhorse)
 src/supervisor.js         keeps server + subcontroller + primary alive
 src/server/               WebSocket hub, dashboard (HTTP + SSE), cycle wiring
-src/workhorse/            subcontroller, Windows adapter, report fork, instances
+src/workhorse/            subcontroller, report fork, instances, and the OS adapters:
+  adapter.js                platform dispatcher (win32 -> adapter-win, darwin -> adapter-mac)
+  adapter-win.js            Windows window/process control (PowerShell + Win32)
+  adapter-mac.js            macOS window/process control (Terminal.app via AppleScript)
 src/cowork.js             the 30-minute cycle (synthesis -> sentences)
 src/instance-hook.js      in-instance hide/close hook (injected per session)
 src/cli.js                operator CLI
 dashboard/index.html      the live dashboard
-scripts/reset.ps1         clean-slate helper
+scripts/reset.ps1         clean-slate helper (Windows)
+scripts/install-startup.* login-startup installer (Windows .ps1 / macOS .sh LaunchAgent)
 ```
 
 Ports: WebSocket **7700**, dashboard **7701**. Data: `~/.execkee`.

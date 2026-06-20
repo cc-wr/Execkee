@@ -16,7 +16,7 @@
 
 import { readTracking, writeTracking, updateInstance } from './common/tracking.js';
 import { DESIRED_STATE, VISIBILITY } from './common/protocol.js';
-import * as adapter from './workhorse/adapter-win.js';
+import * as adapter from './workhorse/adapter.js';
 
 function readStdin() {
   return new Promise(resolve => {

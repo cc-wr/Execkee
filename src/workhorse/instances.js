@@ -2,7 +2,7 @@ import { readTracking, writeTracking, createInstanceRecord, addInstance, updateI
 import { DESIRED_STATE, VISIBILITY, maxDesiredState } from '../common/protocol.js';
 import { existsSync, statSync } from 'fs';
 import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd, resolveSessionId, listLocalSessions, newestSessionInSlugOf } from './reporter.js';
-import * as adapter from './adapter-win.js';
+import * as adapter from './adapter.js';
 import config from '../common/config.js';
 
 export class InstanceManager {
