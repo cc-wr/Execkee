@@ -150,9 +150,9 @@ src/workhorse/            subcontroller, report fork, instances, and the OS adap
   adapter.js                platform dispatcher (win32 -> adapter-win, darwin -> adapter-mac)
   adapter-win.js            Windows window/process control (PowerShell + Win32)
   adapter-mac.js            macOS window/process control (Terminal.app via AppleScript)
-  probe.js / probe-win.js / probe-mac.js   opt-in "probe report" — drive the live
-                            window for a report when its transcript is stale (set
-                            EXECKEE_PROBE_REPORTS=1; off by default)
+  probe.js / probe-win.js / probe-mac.js   "probe report" — drive the live window
+                            for a report when its transcript is stale (on by
+                            default; opt out with EXECKEE_PROBE_REPORTS=0)
 src/cowork.js             the 30-minute cycle (synthesis -> sentences)
 src/instance-hook.js      in-instance hide/close hook (injected per session)
 src/cli.js                operator CLI

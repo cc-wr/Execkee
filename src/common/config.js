@@ -75,9 +75,11 @@ export default Object.freeze({
   // "Probe report": generate status reports by driving the LIVE instance window
   // (read its console frame, inject a short report prompt, read the reply) instead
   // of forking its on-disk transcript — which is stale when a session is driven via
-  // Remote Control. OPT-IN (off by default) because it appends a probe turn to the
-  // user's real conversation. Set EXECKEE_PROBE_REPORTS=1 to enable. See probe.js.
-  PROBE_REPORTS_ENABLED: process.env.EXECKEE_PROBE_REPORTS === '1',
+  // Remote Control. ON by default; set EXECKEE_PROBE_REPORTS=0 to disable. It appends
+  // a probe turn to the user's real conversation, but only when idle (never mid-
+  // inference / at a permission prompt / unchanged) and falls back to the fork report
+  // whenever the live window doesn't behave as expected. See probe.js.
+  PROBE_REPORTS_ENABLED: process.env.EXECKEE_PROBE_REPORTS !== '0',
   PROBE_IDLE_SETTLE_MS: Number(process.env.EXECKEE_PROBE_SETTLE_MS) || 1500,
   PROBE_SETTLE_SAMPLES: Number(process.env.EXECKEE_PROBE_SETTLE_SAMPLES) || 8,
   PROBE_POLL_MS: Number(process.env.EXECKEE_PROBE_POLL_MS) || 2500,
