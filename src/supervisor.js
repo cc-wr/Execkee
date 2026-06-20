@@ -26,7 +26,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 14;
+const BRIEF_VERSION = 15;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -472,13 +472,15 @@ command, NOT just a prose note:
 node "${CLI}" defer "<short topic>" [--until YYYY-MM-DD]
 \`\`\`
 
-This is the **enforced** deferral store: the cycle deterministically suppresses that
-topic's related **instance-surfaced (presumed) tasks** and sentences from the dashboard
-(until the date, if you give one). A prose line in TRACKING.md alone is only *interpreted*
-and can slip through — so **always run \`defer\` for an actual hold**, and also jot the
-context in TRACKING.md if it's useful. To bring a topic back: \`undefer <id|topic>\`
-(\`deferrals\` lists what's active). Keep the topic phrase close to how it appears in the
-surfaced items so the match catches them.
+This is the **enforced** deferral store: the cycle suppresses that topic's related
+**guessed tasks AND instance-surfaced (presumed) tasks** and sentences from the
+dashboard (until the date, if you give one). Relatedness is judged by an **LLM**, by
+meaning — so it catches paraphrases, not just exact words. This works for a guessed
+task too: if the user says "defer that guessed task about X" / "stop guessing X",
+\`defer "X"\` and it'll be matched out of the guesses. A prose line in TRACKING.md alone
+is only *interpreted* and can slip through — so **always run \`defer\` for an actual
+hold**, and also jot the context in TRACKING.md if useful. To bring a topic back:
+\`undefer <id|topic>\` (\`deferrals\` lists what's active).
 
 ## Scheduling a future guess
 

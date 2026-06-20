@@ -100,7 +100,7 @@ export async function runCoworkCycle(hub) {
     standby: !sentenceQueue.major,
     dailyTasks: planTodayItems(plan.items),
     coverageTasks: planHorizonCoverage(plan.items),
-    presumedTasks: await filterDeferredPresumed(cycleReport.presumedTasks || [], today),
+    presumedTasks: await filterDeferredItems(cycleReport.presumedTasks || [], today),
     instanceStatus: instances
       .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
       .map(i => ({
@@ -290,6 +290,8 @@ async function buildDailyPlan({ today, lifeTasks, instances, contextBlock, force
   guesses = guesses
     .map(g => ({ ...g, instance: matchInstance(g.text, instanceNames) }))
     .filter(g => g.text && !backlogTexts.has(normText(g.text)));
+  // Drop guesses related to an active deferral (LLM relatedness; no-op when none).
+  guesses = await filterDeferredItems(guesses, today);
 
   const plan = { date: today, items: sortPlanItems([...backlogItems, ...guesses]) };
   writeDailyPlan(plan);
@@ -443,12 +445,11 @@ async function llmDeferralSuppress(items, defs) {
   }
 }
 
-// Drop presumed tasks that relate to an active deferral. LLM-first (semantic), with
-// the text match (isDeferred) only as a fallback when the model call is unavailable.
-// Applied to BOTH the LLM and fallback presumed-task sets so deferred items leave the
-// panel for sure.
-async function filterDeferredPresumed(presumed, today) {
-  const list = presumed || [];
+// Drop items (presumed tasks OR guessed tasks) that relate to an active deferral.
+// LLM-first (semantic relatedness), with the text match (isDeferred) only as a
+// fallback when the model call is unavailable. Items need a unique `id` and `text`.
+async function filterDeferredItems(items, today) {
+  const list = items || [];
   const defs = activeDeferrals(today);
   if (!defs.length || !list.length) return list;
   const suppress = await llmDeferralSuppress(list, defs);
@@ -465,10 +466,21 @@ export async function addDeferral(topic, until) {
   const id = `def-${Date.now().toString(36)}`;
   data.deferrals.push({ id, topic, until: until || null, createdAt: new Date().toISOString() });
   writeDeferrals(data);
-  // Drop now-deferred presumed tasks from the dashboard immediately (don't wait a cycle).
+  // Immediately drop now-deferred GUESSES (from the plan) AND presumed tasks (from the
+  // dashboard) — one LLM relatedness pass over both, so the user doesn't wait a cycle.
   const today = localDateStr();
+  const plan = readDailyPlan();
+  const guesses = (plan.items || []).filter(i => i.source === 'guess');
+  const presumed = (readDashboardData().presumedTasks) || [];
+  const kept = await filterDeferredItems([...guesses, ...presumed], today);
+  const keptIds = new Set(kept.map(x => String(x.id)));
+  plan.items = (plan.items || []).filter(i => i.source !== 'guess' || keptIds.has(String(i.id)));
+  writeDailyPlan(plan);
   const dash = readDashboardData();
-  dash.presumedTasks = await filterDeferredPresumed(dash.presumedTasks, today);
+  dash.dailyTasks = planTodayItems(plan.items);
+  dash.coverageTasks = planHorizonCoverage(plan.items);
+  dash.presumedTasks = presumed.filter(p => keptIds.has(String(p.id)));
+  dash.updatedBy = 'task-refresh';
   writeDashboardData(dash);
   return { success: true, id, topic, until: until || null };
 }
