@@ -285,6 +285,7 @@ async function buildDailyPlan({ today, lifeTasks, instances, contextBlock, force
   } else {
     guesses = (prev.items || []).filter(i => i.source === 'guess');
   }
+  await reconcileScheduledDeferrals(today); // refresh scheduled-guess deferral flags (expiry/activation)
   guesses = withScheduledGuesses(guesses, today);
   const backlogTexts = new Set(backlogItems.map(i => normText(i.text)));
   guesses = guesses
@@ -474,6 +475,17 @@ export async function addDeferral(topic, until) {
   const presumed = (readDashboardData().presumedTasks) || [];
   const kept = await filterDeferredItems([...guesses, ...presumed], today);
   const keptIds = new Set(kept.map(x => String(x.id)));
+  // Airtight scheduled guesses: flag any whose injected item the LLM suppressed, so the
+  // sync re-injection path stops surfacing it (the flag lifts when the deferral does).
+  const sched = readScheduledGuesses();
+  let schedChanged = false;
+  for (const g of guesses) {
+    if (g.scheduledId && !keptIds.has(String(g.id))) {
+      const e = (sched.items || []).find(x => x.id === g.scheduledId);
+      if (e && !e.deferred) { e.deferred = true; schedChanged = true; }
+    }
+  }
+  if (schedChanged) writeScheduledGuesses(sched);
   plan.items = (plan.items || []).filter(i => i.source !== 'guess' || keptIds.has(String(i.id)));
   writeDailyPlan(plan);
   const dash = readDashboardData();
@@ -485,13 +497,15 @@ export async function addDeferral(topic, until) {
   return { success: true, id, topic, until: until || null };
 }
 
-export function removeDeferral(idOrTopic) {
+export async function removeDeferral(idOrTopic) {
   const key = normText(idOrTopic);
   const data = readDeferrals();
   const before = (data.deferrals || []).length;
   data.deferrals = (data.deferrals || []).filter(d => d.id !== idOrTopic && normText(d.topic) !== key);
   writeDeferrals(data);
-  // Removed items reappear on the next cycle (we don't have them to restore now).
+  // A scheduled guess held by the removed deferral should return — recompute its flag
+  // against the now-active deferrals. (Presumed/LLM-guesses reappear on the next cycle.)
+  await reconcileScheduledDeferrals(localDateStr());
   return { success: data.deferrals.length < before };
 }
 
@@ -503,7 +517,31 @@ export function listDeferrals() {
 
 function activeScheduledGuesses(today) {
   const { items } = readScheduledGuesses();
-  return (items || []).filter(e => e && e.text && e.startDate && e.startDate <= today && (!e.until || e.until >= today));
+  return (items || []).filter(e => e && e.text && e.startDate && e.startDate <= today && (!e.until || e.until >= today) && !e.deferred);
+}
+
+// Keep each scheduled guess's `deferred` flag current vs the active deferrals (LLM
+// relatedness), so the sync re-injection path (withScheduledGuesses) can cheaply skip
+// deferred ones — airtight even between cycles. The flag auto-lifts when the deferral
+// is removed or expires (recomputed against the then-active deferrals). LLM is invoked
+// only when there are both date-active scheduled guesses and active deferrals.
+async function reconcileScheduledDeferrals(today) {
+  const data = readScheduledGuesses();
+  const items = data.items || [];
+  if (!items.length) return;
+  const defs = activeDeferrals(today);
+  const dateActive = items.filter(e => e.startDate && e.startDate <= today && (!e.until || e.until >= today));
+  let supSet = new Set();
+  if (defs.length && dateActive.length) {
+    const llm = await llmDeferralSuppress(dateActive.map(e => ({ id: e.id, text: e.text })), defs);
+    supSet = llm || new Set(dateActive.filter(e => isDeferred(e.text, defs)).map(e => String(e.id)));
+  }
+  let changed = false;
+  for (const e of items) {
+    const next = supSet.has(String(e.id));
+    if (!!e.deferred !== next) { e.deferred = next; changed = true; }
+  }
+  if (changed) writeScheduledGuesses(data);
 }
 
 // Merge active scheduled guesses into a guess list (deduped by text). They look like
@@ -522,7 +560,7 @@ function withScheduledGuesses(guesses, today) {
   return [...(guesses || []), ...inject];
 }
 
-export function addScheduledGuess(text, startDate, until, today) {
+export async function addScheduledGuess(text, startDate, until, today) {
   text = String(text || '').trim();
   if (!text) return { success: false, error: 'empty text' };
   if (!startDate) return { success: false, error: 'startDate required (--on YYYY-MM-DD)' };
@@ -531,9 +569,11 @@ export function addScheduledGuess(text, startDate, until, today) {
   const id = `sg-${Date.now().toString(36)}`;
   data.items.push({ id, text, startDate, until: until || null, today: today !== false, priority: 'normal', createdAt: new Date().toISOString() });
   writeScheduledGuesses(data);
-  // If it's already due, surface it on the dashboard right away (else it appears when its date arrives).
+  // If it's already due, surface it on the dashboard right away (else it appears when its
+  // date arrives). Reconcile first so it isn't surfaced if it matches an active hold.
   const t = localDateStr();
   if (startDate <= t) {
+    await reconcileScheduledDeferrals(t);
     const p = rebuildPlanSync(t, Object.values(readTracking().instances));
     writePlanToDashboard(p);
   }

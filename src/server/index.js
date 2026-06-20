@@ -70,7 +70,7 @@ dashboard.onDefer = async ({ topic, until }) => {
 };
 dashboard.onUndefer = async (id) => {
   const { removeDeferral } = await import('../cowork.js');
-  const result = removeDeferral(id);
+  const result = await removeDeferral(id);
   dashboard.pushUpdate();
   return result;
 };
@@ -82,7 +82,7 @@ dashboard.onListDeferrals = async () => {
 // Scheduled guesses: surface a user-specified task as a tentative guess on a date.
 dashboard.onScheduleGuess = async ({ text, on, until, horizon }) => {
   const { addScheduledGuess } = await import('../cowork.js');
-  const result = addScheduledGuess(text, on, until, !horizon);
+  const result = await addScheduledGuess(text, on, until, !horizon);
   dashboard.pushUpdate();
   return result;
 };
