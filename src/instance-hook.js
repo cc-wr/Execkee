@@ -48,7 +48,10 @@ if (instanceId && liveSessionId) {
     const t = readTracking();
     const inst = t.instances[instanceId];
     if (inst && inst.sessionId !== liveSessionId) {
-      updateInstance(t, instanceId, { sessionId: liveSessionId });
+      // Reset the watermark on a session-id change: the old watermark belongs to the
+      // previous session, so clearing it makes the next cycle report the new live
+      // session in full (even if it's smaller than the old one).
+      updateInstance(t, instanceId, { sessionId: liveSessionId, watermark: null });
       writeTracking(t);
     }
   } catch {}
