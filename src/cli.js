@@ -440,6 +440,28 @@ switch (cmd) {
     break;
   }
 
+  case 'logs': {
+    const LOG_DIR = join(config.DATA_DIR, 'logs');
+    if (!existsSync(LOG_DIR)) { console.log(`No logs yet (${LOG_DIR} does not exist).`); break; }
+    const name = args.find(a => !a.startsWith('--'));
+    if (!name) {
+      console.log(`Logs in ${LOG_DIR}:`);
+      for (const f of readdirSync(LOG_DIR).filter(x => x.endsWith('.log')).sort()) {
+        const st = statSync(join(LOG_DIR, f));
+        console.log(`  ${f.padEnd(22)} ${(st.size / 1024).toFixed(1).padStart(8)}KB  ${st.mtime.toISOString()}`);
+      }
+      console.log('\nTail one:  node src/cli.js logs <name> [--tail N]   (e.g. logs controller --tail 100)');
+      break;
+    }
+    const file = join(LOG_DIR, name.endsWith('.log') ? name : `${name}.log`);
+    if (!existsSync(file)) { console.log(`No such log: ${file}`); break; }
+    const ti = args.indexOf('--tail');
+    const n = ti >= 0 && args[ti + 1] ? parseInt(args[ti + 1], 10) : 80;
+    const lines = readFileSync(file, 'utf8').split('\n');
+    console.log(lines.slice(-Math.max(1, n)).join('\n'));
+    break;
+  }
+
   default:
     console.log('Execkee CLI');
     console.log('');
@@ -471,5 +493,6 @@ switch (cmd) {
     console.log('  issue add <text>           Log an Execkee improvement/bug to the backlog');
     console.log('  issue [all]                List open (or all) backlog issues');
     console.log('  issue done <id>            Mark a backlog issue resolved');
+    console.log('  logs [name] [--tail N]     List logs, or tail one (controller/workhorse/supervisor/primary-chat)');
     break;
 }

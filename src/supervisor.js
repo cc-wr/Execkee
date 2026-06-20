@@ -18,8 +18,11 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import config from './common/config.js';
+import { initProcessLog, tailPrimaryChat } from './common/logger.js';
 import { readTracking, writeTracking } from './common/tracking.js';
 import { listLocalSessions, getSessionCwd, getSessionJsonlPath } from './workhorse/reporter.js';
+
+initProcessLog('supervisor'); // tee supervisor output to ~/.execkee/logs/supervisor.log
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'src', 'cli.js');
@@ -255,8 +258,18 @@ function startPrimary() {
     primaryPid = launchPrimaryWindow();
   }, 5000);
   // KI-6: continuously track the live primary session so resume-on-restart never
-  // reverts to a stale snapshot (or a fresh seed).
-  primarySessionTimer = setInterval(() => { if (!shuttingDown) refreshPrimarySession(); }, 15_000);
+  // reverts to a stale snapshot (or a fresh seed). Also tail the primary's
+  // conversation into ~/.execkee/logs/primary-chat.log so its chats are easy to
+  // review when a bug is raised.
+  const primaryChatState = { id: null, pos: 0 };
+  primarySessionTimer = setInterval(() => {
+    if (shuttingDown) return;
+    refreshPrimarySession();
+    try {
+      const sid = newestLifeTasksSession();
+      if (sid) tailPrimaryChat(sid, getSessionJsonlPath(sid), primaryChatState);
+    } catch (err) { log('primary', `chat-log tail error: ${err.message}`); }
+  }, 15_000);
 }
 
 function openDashboard() {

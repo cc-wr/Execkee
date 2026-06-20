@@ -102,7 +102,15 @@ node src/cli.js sentence                    # current dashboard sentence
 node src/cli.js resolve <issue-id> "msg"    # resolve a dashboard issue
 node src/cli.js issue add "<text>"          # log an improvement/bug to the backlog
 node src/cli.js issue                       # list open backlog items
+node src/cli.js logs                         # list log files (sizes + mtimes)
+node src/cli.js logs controller --tail 100   # tail a log (controller/workhorse/supervisor/primary-chat)
 ```
+
+**Logs.** Each long-running process tees its full output to a rotating file under
+`~/.execkee/logs/` (`controller.log` = server/hub/dashboard/cycle, `workhorse.log`,
+`supervisor.log`), and the primary's conversation is tailed to `primary-chat.log`.
+Check them with `node src/cli.js logs …` (or read the files directly) when something
+misbehaves. Disable with `EXECKEE_LOG=off`; rotation cap is `EXECKEE_LOG_MAX_BYTES`.
 
 Adopting a session produces a **full baseline report by default** and **auto-runs a
 cycle** so the report appears at once (no manual refresh). Use `--from-now` to adopt

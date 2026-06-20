@@ -2,12 +2,15 @@ import { platform, hostname } from 'os';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import config from '../common/config.js';
+import { initProcessLog } from '../common/logger.js';
 import { CMD } from '../common/protocol.js';
 import { killActiveClaudeRuns } from '../common/exec-async.js';
 import { listLocalSessions } from './reporter.js';
 import { ServerConnection } from './connection.js';
 import { InstanceManager } from './instances.js';
 import { snapshotLocal, applyIncoming, startWatch } from '../common/settings-sync.js';
+
+initProcessLog('workhorse'); // tee all workhorse output to ~/.execkee/logs/workhorse.log
 
 function loadConfig() {
   const configPath = join(config.DATA_DIR, 'workhorse-config.json');

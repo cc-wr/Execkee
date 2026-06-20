@@ -1,7 +1,10 @@
 import config from '../common/config.js';
+import { initProcessLog } from '../common/logger.js';
 import { Hub } from './hub.js';
 import { DashboardServer } from './dashboard.js';
 import { snapshotLocal, applyIncoming, readSynced, startWatch } from '../common/settings-sync.js';
+
+initProcessLog('controller'); // tee all server output to ~/.execkee/logs/controller.log
 
 console.log('[server] Starting Execkee controller server...');
 console.log(`[server] Data directory: ${config.DATA_DIR}`);
