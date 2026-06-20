@@ -72,5 +72,16 @@ export default Object.freeze({
   // claude.ai OAuth login (not API key) + Pro/Max plan.
   REMOTE_CONTROL_ENABLED: process.env.EXECKEE_REMOTE_CONTROL !== '0',
 
+  // "Probe report": generate status reports by driving the LIVE instance window
+  // (read its console frame, inject a short report prompt, read the reply) instead
+  // of forking its on-disk transcript — which is stale when a session is driven via
+  // Remote Control. OPT-IN (off by default) because it appends a probe turn to the
+  // user's real conversation. Set EXECKEE_PROBE_REPORTS=1 to enable. See probe.js.
+  PROBE_REPORTS_ENABLED: process.env.EXECKEE_PROBE_REPORTS === '1',
+  PROBE_IDLE_SETTLE_MS: Number(process.env.EXECKEE_PROBE_SETTLE_MS) || 1500,
+  PROBE_SETTLE_SAMPLES: Number(process.env.EXECKEE_PROBE_SETTLE_SAMPLES) || 8,
+  PROBE_POLL_MS: Number(process.env.EXECKEE_PROBE_POLL_MS) || 2500,
+  PROBE_TIMEOUT_MS: Number(process.env.EXECKEE_PROBE_TIMEOUT_MS) || 120_000,
+
   WINDOW_TITLE_PREFIX: 'Execkee',
 });

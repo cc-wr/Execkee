@@ -3,6 +3,7 @@ import { DESIRED_STATE, VISIBILITY, maxDesiredState } from '../common/protocol.j
 import { existsSync, statSync } from 'fs';
 import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd, resolveSessionId, listLocalSessions, newestSessionInSlugOf } from './reporter.js';
 import * as adapter from './adapter.js';
+import * as probe from './probe.js';
 import config from '../common/config.js';
 
 export class InstanceManager {
@@ -226,6 +227,14 @@ export class InstanceManager {
     if (inst.visibility === VISIBILITY.FOREGROUND) {
       return { success: false, error: 'Instance is foregrounded — skip' };
     }
+    // Probe-report path (opt-in, EXECKEE_PROBE_REPORTS=1): generate the report by
+    // driving the live window rather than the on-disk transcript (which is stale
+    // for Remote-Control-bridged sessions). Returns a result to send back; returns
+    // null only on a hard probe failure, in which case we fall through to the fork.
+    if (config.PROBE_REPORTS_ENABLED && probe.probeSupported && inst.pid && adapter.isProcessAlive(inst.pid)) {
+      const pr = await this._probeReportPath(instanceId, inst);
+      if (pr) return pr;
+    }
     // Resolve the LIVE transcript. Best signal: the exact path the instance's own hook
     // recorded on its last prompt (inst.transcriptPath) — handles a session that
     // continued/forked into a new id or moved to a different dir, with no re-adopt.
@@ -284,6 +293,45 @@ export class InstanceManager {
     writeTracking(fresh);
 
     return result;
+  }
+
+  // Opt-in probe report (see probe.js). Holds the instance for the subcontroller
+  // (so the primary can't foreground it mid-probe), drives the live window, and on
+  // success stores the report + the staleness marker. Returns the result to send,
+  // or null on a hard failure so report() falls through to the fork path.
+  async _probeReportPath(instanceId, inst) {
+    const t = readTracking();
+    updateInstance(t, instanceId, { heldBySubcontroller: true });
+    writeTracking(t);
+
+    let result;
+    try {
+      result = await probe.probeReport(inst, { lastMarker: inst.probeMarker });
+    } catch (err) {
+      result = { success: false, error: err.message };
+    }
+
+    const fresh = readTracking();
+    if (result.success) {
+      updateInstance(fresh, instanceId, {
+        heldBySubcontroller: false,
+        lastReportTime: new Date().toISOString(),
+        lastReportContent: result.report,
+        probeMarker: result.marker,
+        reportFailureCount: 0,
+        lastReportError: null,
+      });
+      writeTracking(fresh);
+      console.log(`[instances] ${instanceId} (${inst.name}) probe report ok`);
+      return { success: true, report: result.report };
+    }
+    updateInstance(fresh, instanceId, { heldBySubcontroller: false });
+    writeTracking(fresh);
+
+    if (result.unchanged) return { success: false, error: 'No changes since last probe — skip', skipped: true };
+    if (result.skipped) return { success: false, error: `Probe skipped (${result.reason})`, skipped: true };
+    console.warn(`[instances] ${instanceId} probe failed (${result.error}); falling back to fork report`);
+    return null; // hard failure → report() falls through to the fork path
   }
 
   close(instanceId) {
