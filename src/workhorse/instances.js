@@ -1,6 +1,6 @@
 import { readTracking, writeTracking, createInstanceRecord, addInstance, updateInstance, getInstancesForWorkhorse } from '../common/tracking.js';
 import { DESIRED_STATE, VISIBILITY, maxDesiredState } from '../common/protocol.js';
-import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd, resolveSessionId, listLocalSessions } from './reporter.js';
+import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd, resolveSessionId, listLocalSessions, newestSessionInSlugOf } from './reporter.js';
 import * as adapter from './adapter-win.js';
 import config from '../common/config.js';
 
@@ -224,6 +224,18 @@ export class InstanceManager {
     if (!inst) return { success: false, error: 'Instance not found' };
     if (inst.visibility === VISIBILITY.FOREGROUND) {
       return { success: false, error: 'Instance is foregrounded — skip' };
+    }
+    // Track the LIVE session: if a newer session exists in this instance's project dir
+    // (the conversation continued/forked into a new id, e.g. via an unmanaged window),
+    // adopt it so the report summarizes the LATEST history, not a frozen transcript.
+    // Reset the watermark on a switch so the new session's content is reported.
+    const liveSid = newestSessionInSlugOf(inst.sessionId);
+    if (liveSid && liveSid !== inst.sessionId) {
+      console.log(`[instances] ${instanceId}: live session moved ${inst.sessionId.slice(0, 8)} -> ${liveSid.slice(0, 8)}; tracking it`);
+      updateInstance(tracking, instanceId, { sessionId: liveSid, watermark: null });
+      writeTracking(tracking);
+      inst.sessionId = liveSid;
+      inst.watermark = null;
     }
     if (!hasSessionChanged(inst.sessionId, inst.watermark)) {
       return { success: false, error: 'No changes since last report — skip', skipped: true };

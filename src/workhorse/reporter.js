@@ -1,5 +1,5 @@
 import { statSync, existsSync, readdirSync, openSync, readSync, closeSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { claudeRun } from '../common/exec-async.js';
 import config from '../common/config.js';
@@ -83,6 +83,25 @@ export function listLocalSessions() {
   } catch {}
   out.sort((a, b) => String(b.mtime || '').localeCompare(String(a.mtime || '')));
   return out;
+}
+
+// The most-recently-modified session in the SAME project dir as `sessionId` — i.e.
+// the instance's LIVE conversation, even if it continued/forked into a new session id
+// (so a report summarizes the latest history, not a frozen transcript). Returns the
+// input id if it's still the newest (or on any error).
+export function newestSessionInSlugOf(sessionId) {
+  const path = getSessionJsonlPath(sessionId);
+  if (!path) return sessionId;
+  const dir = dirname(path);
+  let best = sessionId, bestM = 0;
+  try {
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.jsonl')) continue;
+      const m = statSync(join(dir, f)).mtimeMs;
+      if (m > bestM) { bestM = m; best = f.slice(0, -6); }
+    }
+  } catch {}
+  return best;
 }
 
 // `claude --resume <id>` is scoped to the project derived from the cwd, so a
