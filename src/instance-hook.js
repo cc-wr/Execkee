@@ -43,16 +43,25 @@ const instanceId = process.env.EXECKEE_INSTANCE_ID;
 // change, and never let a tracking hiccup block the user's prompt (always fall
 // through to the control-word handling / pass-through below).
 const liveSessionId = String(payload.session_id || '').trim();
+const transcriptPath = String(payload.transcript_path || '').trim();
 if (instanceId && liveSessionId) {
   try {
     const t = readTracking();
     const inst = t.instances[instanceId];
-    if (inst && inst.sessionId !== liveSessionId) {
-      // Reset the watermark on a session-id change: the old watermark belongs to the
-      // previous session, so clearing it makes the next cycle report the new live
-      // session in full (even if it's smaller than the old one).
-      updateInstance(t, instanceId, { sessionId: liveSessionId, watermark: null });
-      writeTracking(t);
+    if (inst) {
+      const idChanged = inst.sessionId !== liveSessionId;
+      const pathChanged = transcriptPath && inst.transcriptPath !== transcriptPath;
+      if (idChanged || pathChanged) {
+        // Record the EXACT live transcript the instance is writing (transcript_path) so
+        // the cycle's report reads it directly — no id/slug guessing, survives a
+        // continued/forked id or a different cwd, and needs no re-adopt. Reset the
+        // watermark on an id change so the new session is reported in full.
+        const patch = { sessionId: liveSessionId };
+        if (transcriptPath) patch.transcriptPath = transcriptPath;
+        if (idChanged) patch.watermark = null;
+        updateInstance(t, instanceId, patch);
+        writeTracking(t);
+      }
     }
   } catch {}
 }

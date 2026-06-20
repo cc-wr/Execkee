@@ -1,5 +1,6 @@
 import { readTracking, writeTracking, createInstanceRecord, addInstance, updateInstance, getInstancesForWorkhorse } from '../common/tracking.js';
 import { DESIRED_STATE, VISIBILITY, maxDesiredState } from '../common/protocol.js';
+import { existsSync, statSync } from 'fs';
 import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd, resolveSessionId, listLocalSessions, newestSessionInSlugOf } from './reporter.js';
 import * as adapter from './adapter-win.js';
 import config from '../common/config.js';
@@ -225,22 +226,28 @@ export class InstanceManager {
     if (inst.visibility === VISIBILITY.FOREGROUND) {
       return { success: false, error: 'Instance is foregrounded — skip' };
     }
-    // Track the LIVE session: if a newer session exists in this instance's project dir
-    // (the conversation continued/forked into a new id, e.g. via an unmanaged window),
-    // adopt it so the report summarizes the LATEST history, not a frozen transcript.
-    // Reset the watermark on a switch so the new session's content is reported.
-    const claimed = new Set(
-      Object.values(tracking.instances).filter(i => i.id !== instanceId && i.sessionId).map(i => i.sessionId)
-    );
-    const liveSid = newestSessionInSlugOf(inst.sessionId, claimed);
-    if (liveSid && liveSid !== inst.sessionId) {
-      console.log(`[instances] ${instanceId}: live session moved ${inst.sessionId.slice(0, 8)} -> ${liveSid.slice(0, 8)}; tracking it`);
-      updateInstance(tracking, instanceId, { sessionId: liveSid, watermark: null });
-      writeTracking(tracking);
-      inst.sessionId = liveSid;
-      inst.watermark = null;
+    // Resolve the LIVE transcript. Best signal: the exact path the instance's own hook
+    // recorded on its last prompt (inst.transcriptPath) — handles a session that
+    // continued/forked into a new id or moved to a different dir, with no re-adopt.
+    // Fall back to newest-in-slug (excluding other instances' sessions), then the
+    // stored id. Reset the watermark on a switch so the new session reports in full.
+    let livePath = inst.transcriptPath && existsSync(inst.transcriptPath) ? inst.transcriptPath : null;
+    if (!livePath) {
+      const claimed = new Set(
+        Object.values(tracking.instances).filter(i => i.id !== instanceId && i.sessionId).map(i => i.sessionId)
+      );
+      const liveSid = newestSessionInSlugOf(inst.sessionId, claimed);
+      if (liveSid && liveSid !== inst.sessionId) {
+        console.log(`[instances] ${instanceId}: live session moved ${inst.sessionId.slice(0, 8)} -> ${liveSid.slice(0, 8)}; tracking it`);
+        updateInstance(tracking, instanceId, { sessionId: liveSid, watermark: null });
+        writeTracking(tracking);
+        inst.sessionId = liveSid;
+        inst.watermark = null;
+      }
+      livePath = getSessionJsonlPath(inst.sessionId);
     }
-    if (!hasSessionChanged(inst.sessionId, inst.watermark)) {
+    const curSize = livePath && existsSync(livePath) ? statSync(livePath).size : 0;
+    if (curSize <= ((inst.watermark && inst.watermark.position) || 0)) {
       return { success: false, error: 'No changes since last report — skip', skipped: true };
     }
 
