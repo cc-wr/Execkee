@@ -21,6 +21,10 @@ export class Hub {
     this.connections = new Map();
     this.liveState = {};
     this.pendingCallbacks = new Map();
+    // requestIds of commands that have a dedicated *_RESULT reply (REPORT,
+    // LIST_SESSIONS) — their generic ACK must NOT resolve the callback, or the ACK
+    // could win the race and drop the result's payload (e.g. a report's content).
+    this.awaitingResult = new Set();
     // Canonical Claude-settings store (settings sync). { [name]: {content, mtime, hash, origin} }.
     // Set by index.js to apply an accepted change to the controller's OWN machine.
     this.canonicalSettings = this._loadCanonical();
@@ -77,6 +81,10 @@ export class Hub {
             break;
 
           case MSG.ACK: {
+            // A command with a dedicated *_RESULT reply (REPORT, LIST_SESSIONS) is
+            // resolved by that result, not by this ACK — ignore the ACK so it can
+            // never drop the result's payload by winning the resolve race.
+            if (this.awaitingResult.has(msg.requestId)) break;
             const cb = this.pendingCallbacks.get(msg.requestId);
             if (cb) {
               this.pendingCallbacks.delete(msg.requestId);
@@ -121,9 +129,15 @@ export class Hub {
     return new Promise((resolve) => {
       const parsed = JSON.parse(msg);
       this.pendingCallbacks.set(parsed.requestId, resolve);
+      // These commands answer with a dedicated *_RESULT message; the ACK must not
+      // resolve them (see the ACK handler).
+      if (command === CMD.REPORT || command === CMD.LIST_SESSIONS) {
+        this.awaitingResult.add(parsed.requestId);
+      }
       setTimeout(() => {
         if (this.pendingCallbacks.has(parsed.requestId)) {
           this.pendingCallbacks.delete(parsed.requestId);
+          this.awaitingResult.delete(parsed.requestId);
           resolve({ success: false, error: 'Timeout' });
         }
       }, 30_000);
@@ -326,6 +340,7 @@ export class Hub {
     const cb = this.pendingCallbacks.get(msg.requestId);
     if (cb) {
       this.pendingCallbacks.delete(msg.requestId);
+      this.awaitingResult.delete(msg.requestId);
       cb({ success: msg.success, report: msg.report, error: msg.error });
     }
   }
@@ -334,6 +349,7 @@ export class Hub {
     const cb = this.pendingCallbacks.get(msg.requestId);
     if (cb) {
       this.pendingCallbacks.delete(msg.requestId);
+      this.awaitingResult.delete(msg.requestId);
       cb({ success: msg.success, sessions: msg.sessions || [], error: msg.error });
     }
   }
