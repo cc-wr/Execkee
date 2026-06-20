@@ -227,10 +227,12 @@ export class InstanceManager {
     if (inst.visibility === VISIBILITY.FOREGROUND) {
       return { success: false, error: 'Instance is foregrounded — skip' };
     }
-    // Probe-report path (opt-in, EXECKEE_PROBE_REPORTS=1): generate the report by
-    // driving the live window rather than the on-disk transcript (which is stale
-    // for Remote-Control-bridged sessions). Returns a result to send back; returns
-    // null only on a hard probe failure, in which case we fall through to the fork.
+    // Probe-report path (on by default; EXECKEE_PROBE_REPORTS=0 to disable):
+    // generate the report by driving the live window rather than the on-disk
+    // transcript (which is stale for Remote-Control-bridged sessions). Foregrounded
+    // instances are already excluded above, so the probe never injects into a window
+    // the user has pulled up. Returns a result to send back; returns null only on a
+    // hard probe failure, in which case we fall through to the fork.
     if (config.PROBE_REPORTS_ENABLED && probe.probeSupported && inst.pid && adapter.isProcessAlive(inst.pid)) {
       const pr = await this._probeReportPath(instanceId, inst);
       if (pr) return pr;
