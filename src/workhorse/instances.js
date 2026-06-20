@@ -11,6 +11,7 @@ export class InstanceManager {
     this.workhorseId = workhorseId;
     this.onEvent = onEvent || (() => {});
     this.monitors = new Map();
+    this._probing = new Set(); // instances with a probe in flight (one at a time)
   }
 
   // Apply the controller's authoritative roster (MSG.SYNC) into the local mirror,
@@ -302,40 +303,53 @@ export class InstanceManager {
   // success stores the report + the staleness marker. Returns the result to send,
   // or null on a hard failure so report() falls through to the fork path.
   async _probeReportPath(instanceId, inst) {
-    const t = readTracking();
-    updateInstance(t, instanceId, { heldBySubcontroller: true });
-    writeTracking(t);
-
-    let result;
+    // One probe per instance at a time. Without this, overlapping report triggers
+    // each settle-and-inject before the model has responded to the first, splicing
+    // several probe prompts into the window at once (the "first probe succeeded but
+    // it still sent three" bug). A probe arriving while one is in flight just skips —
+    // the in-flight one will produce the report.
+    if (this._probing.has(instanceId)) {
+      return { success: false, error: 'Probe already in flight — skip', skipped: true };
+    }
+    this._probing.add(instanceId);
     try {
-      result = await probe.probeReport(inst, { lastMarker: inst.probeMarker });
-    } catch (err) {
-      result = { success: false, error: err.message };
-    }
+      const t = readTracking();
+      updateInstance(t, instanceId, { heldBySubcontroller: true });
+      writeTracking(t);
 
-    const fresh = readTracking();
-    if (result.success) {
-      updateInstance(fresh, instanceId, {
-        heldBySubcontroller: false,
-        lastReportTime: new Date().toISOString(),
-        lastReportContent: result.report,
-        probeMarker: result.marker,
-        reportFailureCount: 0,
-        lastReportError: null,
-      });
+      let result;
+      try {
+        result = await probe.probeReport(inst, { lastMarker: inst.probeMarker });
+      } catch (err) {
+        result = { success: false, error: err.message };
+      }
+
+      const fresh = readTracking();
+      if (result.success) {
+        updateInstance(fresh, instanceId, {
+          heldBySubcontroller: false,
+          lastReportTime: new Date().toISOString(),
+          lastReportContent: result.report,
+          probeMarker: result.marker,
+          reportFailureCount: 0,
+          lastReportError: null,
+        });
+        writeTracking(fresh);
+        console.log(`[instances] ${instanceId} (${inst.name}) probe report ok`);
+        return { success: true, report: result.report };
+      }
+      updateInstance(fresh, instanceId, { heldBySubcontroller: false });
       writeTracking(fresh);
-      console.log(`[instances] ${instanceId} (${inst.name}) probe report ok`);
-      return { success: true, report: result.report };
-    }
-    updateInstance(fresh, instanceId, { heldBySubcontroller: false });
-    writeTracking(fresh);
 
-    if (result.unchanged) return { success: false, error: 'No changes since last probe — skip', skipped: true };
-    if (result.skipped) return { success: false, error: `Probe skipped (${result.reason})`, skipped: true };
-    // result.fallback (or any other non-skip failure): the live-window probe did
-    // not behave as expected — revert to the on-disk fork report this cycle.
-    console.warn(`[instances] ${instanceId} probe -> fork fallback (${result.error})`);
-    return null; // report() falls through to the fork path
+      if (result.unchanged) return { success: false, error: 'No changes since last probe — skip', skipped: true };
+      if (result.skipped) return { success: false, error: `Probe skipped (${result.reason})`, skipped: true };
+      // result.fallback (or any other non-skip failure): the live-window probe did
+      // not behave as expected — revert to the on-disk fork report this cycle.
+      console.warn(`[instances] ${instanceId} probe -> fork fallback (${result.error})`);
+      return null; // report() falls through to the fork path
+    } finally {
+      this._probing.delete(instanceId);
+    }
   }
 
   close(instanceId) {
