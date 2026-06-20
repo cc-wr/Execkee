@@ -229,7 +229,10 @@ export class InstanceManager {
     // (the conversation continued/forked into a new id, e.g. via an unmanaged window),
     // adopt it so the report summarizes the LATEST history, not a frozen transcript.
     // Reset the watermark on a switch so the new session's content is reported.
-    const liveSid = newestSessionInSlugOf(inst.sessionId);
+    const claimed = new Set(
+      Object.values(tracking.instances).filter(i => i.id !== instanceId && i.sessionId).map(i => i.sessionId)
+    );
+    const liveSid = newestSessionInSlugOf(inst.sessionId, claimed);
     if (liveSid && liveSid !== inst.sessionId) {
       console.log(`[instances] ${instanceId}: live session moved ${inst.sessionId.slice(0, 8)} -> ${liveSid.slice(0, 8)}; tracking it`);
       updateInstance(tracking, instanceId, { sessionId: liveSid, watermark: null });

@@ -16,6 +16,12 @@ function ensureInstanceSettings() {
   if (settingsWritten) return INSTANCE_SETTINGS_FILE;
   const settings = {
     hooks: {
+      // SessionStart fires on launch/resume/clear/compact with the live session_id, so
+      // the instance's own id is captured IMMEDIATELY (not just on the next prompt) —
+      // keeps inst.sessionId exact for reports/resume. Same hook script as below.
+      SessionStart: [
+        { hooks: [{ type: 'command', command: `node "${HOOK_PATH}"` }] },
+      ],
       UserPromptSubmit: [
         { hooks: [{ type: 'command', command: `node "${HOOK_PATH}"` }] },
       ],

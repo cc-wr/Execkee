@@ -89,7 +89,7 @@ export function listLocalSessions() {
 // the instance's LIVE conversation, even if it continued/forked into a new session id
 // (so a report summarizes the latest history, not a frozen transcript). Returns the
 // input id if it's still the newest (or on any error).
-export function newestSessionInSlugOf(sessionId) {
+export function newestSessionInSlugOf(sessionId, exclude = new Set()) {
   const path = getSessionJsonlPath(sessionId);
   if (!path) return sessionId;
   const dir = dirname(path);
@@ -97,8 +97,13 @@ export function newestSessionInSlugOf(sessionId) {
   try {
     for (const f of readdirSync(dir)) {
       if (!f.endsWith('.jsonl')) continue;
+      const id = f.slice(0, -6);
+      // Never adopt a session that belongs to ANOTHER managed instance (problem 1:
+      // don't grab a sibling's conversation in a shared project dir). The instance's
+      // own id is always allowed.
+      if (id !== sessionId && exclude.has(id)) continue;
       const m = statSync(join(dir, f)).mtimeMs;
-      if (m > bestM) { bestM = m; best = f.slice(0, -6); }
+      if (m > bestM) { bestM = m; best = id; }
     }
   } catch {}
   return best;

@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
-// UserPromptSubmit hook, injected into managed instances via `--settings`
-// (session-scoped — the user's global ~/.claude is never touched).
+// Hook injected into managed instances via `--settings` (session-scoped — the user's
+// global ~/.claude is never touched). Wired for BOTH UserPromptSubmit and SessionStart:
+// on every prompt AND on session launch/resume/compact it captures the live `session_id`
+// (KI-6) so the instance's stored session never drifts from the running one. The
+// hide/close control words only apply to UserPromptSubmit (SessionStart has no prompt).
 //
 // It realizes the spec's in-instance control pathways:
 //   - typed `hide`  → background this instance locally (§4.1 pathway 2)
