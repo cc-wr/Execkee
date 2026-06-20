@@ -330,8 +330,10 @@ export class InstanceManager {
 
     if (result.unchanged) return { success: false, error: 'No changes since last probe — skip', skipped: true };
     if (result.skipped) return { success: false, error: `Probe skipped (${result.reason})`, skipped: true };
-    console.warn(`[instances] ${instanceId} probe failed (${result.error}); falling back to fork report`);
-    return null; // hard failure → report() falls through to the fork path
+    // result.fallback (or any other non-skip failure): the live-window probe did
+    // not behave as expected — revert to the on-disk fork report this cycle.
+    console.warn(`[instances] ${instanceId} probe -> fork fallback (${result.error})`);
+    return null; // report() falls through to the fork path
   }
 
   close(instanceId) {

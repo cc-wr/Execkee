@@ -82,6 +82,10 @@ export default Object.freeze({
   PROBE_SETTLE_SAMPLES: Number(process.env.EXECKEE_PROBE_SETTLE_SAMPLES) || 8,
   PROBE_POLL_MS: Number(process.env.EXECKEE_PROBE_POLL_MS) || 2500,
   PROBE_TIMEOUT_MS: Number(process.env.EXECKEE_PROBE_TIMEOUT_MS) || 120_000,
+  // After injecting, the model must start responding (go busy or emit a marker)
+  // within this window or the probe is judged "not accepted" (TUI not behaving as
+  // expected, e.g. the prompt never submitted) and falls back to the fork report.
+  PROBE_ACCEPT_MS: Number(process.env.EXECKEE_PROBE_ACCEPT_MS) || 25_000,
 
   WINDOW_TITLE_PREFIX: 'Execkee',
 });

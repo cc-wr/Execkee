@@ -144,15 +144,22 @@ function extractReport(frame, begin, end) {
 // Drive `inst`'s live window to produce a report. Returns one of:
 //   { success:true, report, marker }            — got a fresh report
 //   { success:false, unchanged:true }            — idle + unchanged since lastMarker
-//   { success:false, skipped:true, reason }      — busy / not-ready (try later)
-//   { success:false, error }                     — failed (caller may fall back)
+//   { success:false, skipped:true, reason }      — busy / awaiting-user: retry later
+//   { success:false, fallback:true, error }      — TUI did NOT behave as expected;
+//                                                  caller should use the fork report
+// The fallback path is the validation: every way the live-window round-trip can
+// misbehave (can't read the frame, never reaches a ready state, the injected prompt
+// isn't accepted, or no report arrives) returns fallback:true so report() reverts
+// to the on-disk fork report instead of producing a bad/empty report or hanging.
 export async function probeReport(inst, { lastMarker } = {}) {
   const pid = inst && inst.pid;
-  if (!probeSupported) return { success: false, error: 'probe not supported on this platform' };
-  if (!pid) return { success: false, error: 'no pid' };
+  if (!probeSupported) return { success: false, fallback: true, error: 'probe not supported on this platform' };
+  if (!pid) return { success: false, fallback: true, error: 'no pid' };
 
   const first = readFrame(pid);
-  if (!first || first.startsWith('ATTACH_FAIL')) return { success: false, error: `cannot read console frame (${(first || '').trim() || 'empty'})` };
+  if (!first || first.startsWith('ATTACH_FAIL')) {
+    return { success: false, fallback: true, error: `cannot read console frame (${(first || '').trim() || 'empty'})` };
+  }
 
   // Wait until idle: the status bar is up (TUI ready) and it is NOT generating
   // (no "esc to interrupt") for two consecutive samples. Robust to a welcome
@@ -163,35 +170,49 @@ export async function probeReport(inst, { lastMarker } = {}) {
   for (let i = 0; i < config.PROBE_SETTLE_SAMPLES; i++) {
     await sleep(config.PROBE_IDLE_SETTLE_MS);
     const cur = readFrame(pid);
-    if (cur.startsWith('ATTACH_FAIL')) return { success: false, error: 'console detached mid-probe' };
+    if (cur.startsWith('ATTACH_FAIL')) return { success: false, fallback: true, error: 'console detached mid-probe' };
     if (isBusy(cur) || !looksReady(cur) || isInteractivePrompt(cur)) { readyStreak = 0; continue; }
     readyStreak++;
     settled = cur;
     if (readyStreak >= 2) break;
   }
   if (readyStreak < 2 || !settled) {
+    // Busy / awaiting-user are EXPECTED transient states — skip and retry next cycle.
+    // Anything else means the TUI never reached a recognizable ready state (not
+    // behaving as expected) — fall back to the fork report.
     const cur = readFrame(pid);
-    const reason = isBusy(cur) ? 'instance is mid-inference'
-      : isInteractivePrompt(cur) ? 'instance is at an interactive prompt (permission/trust)'
-      : 'instance not idle/ready';
-    return { success: false, skipped: true, reason };
+    if (isBusy(cur)) return { success: false, skipped: true, reason: 'instance is mid-inference' };
+    if (isInteractivePrompt(cur)) return { success: false, skipped: true, reason: 'instance is at an interactive prompt (permission/trust)' };
+    return { success: false, fallback: true, error: 'TUI never reached a ready state' };
   }
   if (lastMarker && !hasNewContentAfter(settled, lastMarker)) return { success: false, unchanged: true };
 
   const token = Math.random().toString(36).slice(2, 9);
   const begin = `[[EXK-B-${token}]]`;
   const end = `[[EXK-E-${token}]]`;
-  if (!injectText(pid, buildPrompt(begin, end))) return { success: false, error: 'inject failed' };
+  if (!injectText(pid, buildPrompt(begin, end))) return { success: false, fallback: true, error: 'inject failed' };
 
-  const deadline = Date.now() + config.PROBE_TIMEOUT_MS;
+  // VALIDATE the round-trip: confirm the injection was accepted and the model began
+  // responding (it went busy, or a marker line appeared) within PROBE_ACCEPT_MS. If
+  // not — e.g. the prompt never submitted, or this isn't a normal claude TUI — bail
+  // fast to the fork report rather than waiting out the full timeout.
+  const started = Date.now();
+  const acceptBy = started + config.PROBE_ACCEPT_MS;
+  const deadline = started + config.PROBE_TIMEOUT_MS;
+  let accepted = false;
   while (Date.now() < deadline) {
     await sleep(config.PROBE_POLL_MS);
     const f = readFrame(pid);
+    if (f.startsWith('ATTACH_FAIL')) return { success: false, fallback: true, error: 'console detached during probe' };
+    if (!accepted && (isBusy(f) || frameHasReport(f, begin) || frameHasReport(f, end))) accepted = true;
     if (frameHasReport(f, end)) {
       const report = extractReport(f, begin, end);
       if (report) return { success: true, report, marker: end };
-      // standalone end marker present but couldn't parse — give it another cycle.
+      // standalone end marker present but not yet parseable — keep polling.
+    }
+    if (!accepted && Date.now() > acceptBy) {
+      return { success: false, fallback: true, error: 'probe not accepted — TUI did not respond to the injected prompt' };
     }
   }
-  return { success: false, error: 'probe timed out waiting for report' };
+  return { success: false, fallback: true, error: 'probe timed out waiting for report' };
 }
