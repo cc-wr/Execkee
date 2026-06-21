@@ -29,7 +29,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 16;
+const BRIEF_VERSION = 17;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -376,6 +376,14 @@ wants deltas-only.
 permissions" / "let it run unattended", append \`--full-permissions\` — the adopted
 instance then runs with approval prompts disabled, and the mode is durable across
 relaunch (crash-recovery / restart keep it).
+
+**Heads-up when CHANGING the permission mode of an already-running instance** (e.g.
+re-adopting it with \`--full-permissions\` when it's currently managed without): there
+is no in-place permission change — it requires the window to exit and relaunch via
+\`--resume\`, which reloads the on-disk transcript and can **drop recent turns the live
+window held in memory but hadn't flushed**. Before doing a full-perms re-adopt of an
+active instance, warn the user that recent unsaved conversation may be lost, and let
+them confirm (iss-5).
 
 ## Releasing vs closing an instance
 
