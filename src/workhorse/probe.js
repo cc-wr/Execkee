@@ -62,12 +62,21 @@ function userComposing(frame) {
   return false;
 }
 
+// Volatile TUI chrome to ignore in BOTH the stability check and the "new content
+// after the marker" check: status bar, token counter, rotating tip, and the
+// post-response status footer like "Baked for 3s" (Claude Code's done-timer; the
+// working words vary — Baking/Brewing/etc. — so match the "<word> for <N>s" shape).
+// That footer slipping through made the unchanged-guard read it as a fresh turn, so
+// the probe re-fired every cycle on an unchanged session (seen in the ProcessLink
+// window: identical reports, one per cycle). Stateless (no /g) — safe to reuse.
+const CHROME_RE = /shift\+tab|bypass permissions|\btokens\b|for agents|auto-accept|to interrupt|^\s*[a-z]+ for \d+(\.\d+)?s\b/i;
+
 // Frame normalized for the stability check: drop the volatile bottom chrome (status
 // bar, token counter, rotating tip) so a ticking counter doesn't prevent settling,
 // but KEEP the conversation + input box so active typing/rendering breaks stability.
 function idleStableNorm(frame) {
   return frame.split('\n').map(clean)
-    .filter((l) => !/shift\+tab|bypass permissions|\btokens\b|for agents|auto-accept|to interrupt/i.test(l))
+    .filter((l) => !CHROME_RE.test(l))
     .join('\n').replace(/\n{2,}/g, '\n').trim();
 }
 
@@ -86,7 +95,7 @@ function hasNewContentAfter(frame, marker) {
   for (const t of lines.slice(idx + 1)) {
     if (t.length <= 3) continue;            // blank / collapsed border / lone '>'
     if (t.startsWith('>')) continue;        // input prompt line
-    if (/shift\+tab|bypass permissions|\btokens\b|for agents|auto-accept|to interrupt/i.test(t)) continue;
+    if (CHROME_RE.test(t)) continue;
     return true; // a fresh turn after the marker
   }
   return false;
