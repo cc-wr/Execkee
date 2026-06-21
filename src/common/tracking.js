@@ -1,29 +1,39 @@
-import { readFileSync, writeFileSync, existsSync, renameSync, unlinkSync } from 'fs';
 import config from './config.js';
 import { DESIRED_STATE, VISIBILITY } from './protocol.js';
+import { readJsonSafe, atomicWriteJson, snapshotBackup } from './safe-fs.js';
 
 function emptyTrackingFile() {
   return { version: 1, workhorses: {}, instances: {} };
 }
 
 export function readTracking() {
-  if (!existsSync(config.TRACKING_FILE)) return emptyTrackingFile();
-  try {
-    return JSON.parse(readFileSync(config.TRACKING_FILE, 'utf-8'));
-  } catch {
-    return emptyTrackingFile();
-  }
+  // Corruption-preserving read (safe-fs): a corrupt tracking file is moved aside, not
+  // silently reported as empty — so a later write can't persist the empty default over
+  // it. Previously a parse error was masked as { instances:{} }, which is one way the
+  // whole instance set could vanish.
+  return readJsonSafe(config.TRACKING_FILE, emptyTrackingFile(), config.TRACKING_FILE);
 }
 
 export function writeTracking(data) {
-  const tmp = config.TRACKING_FILE + '.tmp';
-  writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  try {
-    renameSync(tmp, config.TRACKING_FILE);
-  } catch {
-    try { unlinkSync(config.TRACKING_FILE); } catch {}
-    renameSync(tmp, config.TRACKING_FILE);
+  // Atomic write that RETRIES the rename instead of unlinking the target on failure.
+  // The old fallback unlinked the file first, opening a window with no file; on Windows
+  // the rename fails often (the workhorse, the state loop, and the per-instance hooks
+  // all hold tracking.json at once), so that window was hit routinely and a concurrent
+  // reader could see "missing" -> empty -> persist the wipe. See safe-fs.js.
+  //
+  // Defense in depth: if this write would drop a populated instance set to empty, back
+  // the file up and log loudly first. The write still proceeds (removing the last
+  // instance is legitimate), but it is now recoverable and visible.
+  const inInst = data && data.instances ? Object.keys(data.instances).length : 0;
+  if (inInst === 0) {
+    const cur = readJsonSafe(config.TRACKING_FILE, null, config.TRACKING_FILE);
+    const curInst = cur && cur.instances ? Object.keys(cur.instances).length : 0;
+    if (curInst > 0) {
+      snapshotBackup(config.TRACKING_FILE);
+      console.error(`[tracking] writing tracking with 0 instances over ${curInst} existing — backed up first (instance-loss guard). Investigate if unexpected.`);
+    }
   }
+  atomicWriteJson(config.TRACKING_FILE, data);
 }
 
 export function createInstanceRecord({ id, workhorseId, name, projectPath, sessionId, visibility }) {

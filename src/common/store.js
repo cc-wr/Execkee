@@ -1,17 +1,16 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
 import config from './config.js';
+import { readJsonSafe, atomicWriteJson, snapshotBackup } from './safe-fs.js';
 
+// Atomic write + corruption-preserving read (see safe-fs.js). Previously writeJson was
+// a bare non-atomic writeFileSync and readJson silently returned the fallback on a
+// parse error — together they could replace a corrupt-but-recoverable store with the
+// empty default and persist it (total data loss).
 function readJson(path, fallback) {
-  if (!existsSync(path)) return fallback;
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
-  } catch {
-    return fallback;
-  }
+  return readJsonSafe(path, fallback, path);
 }
 
 function writeJson(path, data) {
-  writeFileSync(path, JSON.stringify(data, null, 2), 'utf-8');
+  atomicWriteJson(path, data);
 }
 
 // --- Dashboard Data ---
@@ -144,6 +143,20 @@ export function readLifeTasks() {
 }
 
 export function writeLifeTasks(data) {
+  // The only programmatic writer (cowork.js promoteToBacklog) ADDS tasks — it never
+  // empties the store. So a write that would drop a non-empty store to zero is almost
+  // certainly a spurious empty read; refuse it loudly rather than persist the loss.
+  // The primary edits tasks.json directly (not through here), so a legitimate "clear
+  // all" doesn't hit this path; override with EXECKEE_ALLOW_EMPTY_TASKS=1 if needed.
+  const incoming = data && Array.isArray(data.tasks) ? data.tasks.length : 0;
+  if (incoming === 0 && process.env.EXECKEE_ALLOW_EMPTY_TASKS !== '1') {
+    const cur = readJsonSafe(config.LIFE_TASKS_FILE, { tasks: [] }, config.LIFE_TASKS_FILE);
+    if ((cur.tasks || []).length > 0) {
+      console.error(`[store] REFUSED to overwrite ${cur.tasks.length} life-task(s) with an empty store (likely a corrupt/empty read). Set EXECKEE_ALLOW_EMPTY_TASKS=1 to force.`);
+      return;
+    }
+  }
+  snapshotBackup(config.LIFE_TASKS_FILE);
   writeJson(config.LIFE_TASKS_FILE, data);
 }
 
