@@ -90,7 +90,14 @@ export async function runCoworkCycle(hub) {
   };
   writeSentenceQueue(sentenceQueue);
 
-  // Step 6: Rebuild dashboard data
+  // Step 6: Rebuild dashboard data. Re-read the plan FRESH here rather than using the
+  // Step-1 snapshot (iss-8): the report collection + synthesis awaits above can take
+  // minutes, during which a `refresh-tasks` (a primary task edit/delete/complete) may
+  // have rebuilt daily-plan.json. Writing the stale snapshot would clobber that
+  // refresh's dashboard with pre-edit tasks (the symptom: a deleted task lingering /
+  // a completed task showing incomplete in dashboard-data, though daily-plan was right).
+  const presumedTasks = await filterDeferredItems(cycleReport.presumedTasks || [], today);
+  const freshPlan = readDailyPlan();
   const dashboardData = {
     version: 1,
     updatedBy: 'cowork',
@@ -98,9 +105,9 @@ export async function runCoworkCycle(hub) {
       ? { id: sentenceQueue.major.id, text: sentenceQueue.major.text, priority: 1 }
       : null,
     standby: !sentenceQueue.major,
-    dailyTasks: planTodayItems(plan.items),
-    coverageTasks: planHorizonCoverage(plan.items),
-    presumedTasks: await filterDeferredItems(cycleReport.presumedTasks || [], today),
+    dailyTasks: planTodayItems(freshPlan.items),
+    coverageTasks: planHorizonCoverage(freshPlan.items),
+    presumedTasks,
     instanceStatus: instances
       .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
       .map(i => ({
