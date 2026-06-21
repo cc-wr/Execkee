@@ -14,7 +14,7 @@
 // Both block the prompt from reaching the model. Anything else passes through.
 // No-op when EXECKEE_INSTANCE_ID is unset (i.e. an unmanaged session).
 
-import { readTracking, writeTracking, updateInstance } from './common/tracking.js';
+import { readTracking, updateInstance, mutateTracking } from './common/tracking.js';
 import { DESIRED_STATE, VISIBILITY } from './common/protocol.js';
 import * as adapter from './workhorse/adapter.js';
 
@@ -46,23 +46,24 @@ const liveSessionId = String(payload.session_id || '').trim();
 const transcriptPath = String(payload.transcript_path || '').trim();
 if (instanceId && liveSessionId) {
   try {
-    const t = readTracking();
-    const inst = t.instances[instanceId];
-    if (inst) {
+    // Serialized (mutateTracking) — the hook runs in its OWN process, concurrent with
+    // the workhorse, both writing the same tracking.json; without the lock a stale
+    // read + late write here could drop a concurrently-added instance.
+    mutateTracking(t => {
+      const inst = t.instances[instanceId];
+      if (!inst) return false;
       const idChanged = inst.sessionId !== liveSessionId;
       const pathChanged = transcriptPath && inst.transcriptPath !== transcriptPath;
-      if (idChanged || pathChanged) {
-        // Record the EXACT live transcript the instance is writing (transcript_path) so
-        // the cycle's report reads it directly — no id/slug guessing, survives a
-        // continued/forked id or a different cwd, and needs no re-adopt. Reset the
-        // watermark on an id change so the new session is reported in full.
-        const patch = { sessionId: liveSessionId };
-        if (transcriptPath) patch.transcriptPath = transcriptPath;
-        if (idChanged) patch.watermark = null;
-        updateInstance(t, instanceId, patch);
-        writeTracking(t);
-      }
-    }
+      if (!(idChanged || pathChanged)) return false;
+      // Record the EXACT live transcript the instance is writing (transcript_path) so
+      // the cycle's report reads it directly — no id/slug guessing, survives a
+      // continued/forked id or a different cwd, and needs no re-adopt. Reset the
+      // watermark on an id change so the new session is reported in full.
+      const patch = { sessionId: liveSessionId };
+      if (transcriptPath) patch.transcriptPath = transcriptPath;
+      if (idChanged) patch.watermark = null;
+      updateInstance(t, instanceId, patch);
+    });
   } catch {}
 }
 
@@ -71,21 +72,18 @@ if (!instanceId || (prompt !== 'hide' && prompt !== 'close')) {
   process.exit(0);
 }
 
-const tracking = readTracking();
-const inst = tracking.instances[instanceId];
+const inst = readTracking().instances[instanceId];
 if (!inst) process.exit(0);
 
 if (prompt === 'hide') {
-  adapter.hideWindow(inst.windowHandle);
-  updateInstance(tracking, instanceId, { visibility: VISIBILITY.HIDDEN });
-  writeTracking(tracking);
+  adapter.hideWindow(inst.windowHandle); // adapter call outside the lock
+  mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { visibility: VISIBILITY.HIDDEN }); });
   process.stderr.write('[execkee] Instance hidden — pull it up from the primary when you need it.\n');
   process.exit(2); // block the prompt
 }
 
 if (prompt === 'close') {
-  updateInstance(tracking, instanceId, { desiredState: DESIRED_STATE.CLOSING });
-  writeTracking(tracking);
+  mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { desiredState: DESIRED_STATE.CLOSING }); });
   process.stderr.write('[execkee] Closing this instance.\n');
   process.exit(2); // block the prompt; subcontroller monitor kills + finalizes
 }

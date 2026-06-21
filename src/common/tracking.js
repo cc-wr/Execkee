@@ -1,6 +1,6 @@
 import config from './config.js';
 import { DESIRED_STATE, VISIBILITY } from './protocol.js';
-import { readJsonSafe, atomicWriteJson, snapshotBackup } from './safe-fs.js';
+import { readJsonSafe, atomicWriteJson, snapshotBackup, acquireLock, releaseLock } from './safe-fs.js';
 
 function emptyTrackingFile() {
   return { version: 1, workhorses: {}, instances: {} };
@@ -90,4 +90,24 @@ export function removeInstance(tracking, instanceId) {
 
 export function getInstancesForWorkhorse(tracking, workhorseId) {
   return Object.values(tracking.instances).filter(i => i.workhorseId === workhorseId);
+}
+
+// Serialized read-modify-write of the tracking store. Acquire a cross-process lock,
+// read fresh, apply `fn(tracking)` (a SHORT synchronous mutation — no awaits, no
+// adapter/PowerShell calls), then write. `fn` may return false to signal "no change"
+// and skip the write. This is the cross-process race fix: the workhorse and the
+// per-instance hooks all mutate the SAME tracking.json, and without serialization a
+// stale read + late write drops a concurrently-added/updated instance. Use this for
+// every workhorse-side mutation; keep slow work outside the callback.
+export function mutateTracking(fn) {
+  const lock = acquireLock(config.TRACKING_FILE);
+  try {
+    const tracking = readTracking();
+    const r = fn(tracking);
+    if (r === false) return tracking;
+    writeTracking(tracking);
+    return tracking;
+  } finally {
+    releaseLock(lock);
+  }
 }

@@ -1,10 +1,19 @@
-import { readTracking, writeTracking, createInstanceRecord, addInstance, updateInstance, getInstancesForWorkhorse } from '../common/tracking.js';
+import { readTracking, mutateTracking, createInstanceRecord, addInstance, updateInstance, getInstancesForWorkhorse } from '../common/tracking.js';
 import { DESIRED_STATE, VISIBILITY, maxDesiredState } from '../common/protocol.js';
 import { existsSync, statSync } from 'fs';
 import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd, resolveSessionId, listLocalSessions, newestSessionInSlugOf } from './reporter.js';
 import * as adapter from './adapter.js';
 import * as probe from './probe.js';
 import config from '../common/config.js';
+
+// Every mutation of the local tracking store goes through mutateTracking (a
+// cross-process-locked read-modify-write), because the per-instance hooks run in
+// SEPARATE processes and mutate the SAME tracking.json concurrently; an unlocked
+// stale-read + late-write on either side drops a concurrently-added/updated instance
+// (the lost-update that wiped instance management). The lock is held only around the
+// short synchronous callback — adapter calls (launch/show/hide/kill) and `await`s stay
+// OUTSIDE it, so a slow PowerShell/AppleScript op never blocks another writer. A
+// callback returning false means "no change" and skips the write.
 
 export class InstanceManager {
   constructor({ workhorseId, onEvent }) {
@@ -20,21 +29,21 @@ export class InstanceManager {
   // records. desiredState only advances toward terminal. Then startAll launches/
   // monitors — stale pids are handled there (dead → relaunch, alive → just monitor).
   applySync(records) {
-    const tracking = readTracking();
-    for (const r of (records || [])) {
-      if (!r.id) continue;
-      const cur = tracking.instances[r.id];
-      if (!cur) {
-        tracking.instances[r.id] = { ...r };
-      } else {
-        if (r.name) cur.name = r.name;
-        if (r.sessionId) cur.sessionId = r.sessionId;
-        if (r.workhorseId) cur.workhorseId = r.workhorseId;
-        if (r.projectPath) cur.projectPath = r.projectPath;
-        cur.desiredState = maxDesiredState(cur.desiredState, r.desiredState);
+    mutateTracking(tracking => {
+      for (const r of (records || [])) {
+        if (!r.id) continue;
+        const cur = tracking.instances[r.id];
+        if (!cur) {
+          tracking.instances[r.id] = { ...r };
+        } else {
+          if (r.name) cur.name = r.name;
+          if (r.sessionId) cur.sessionId = r.sessionId;
+          if (r.workhorseId) cur.workhorseId = r.workhorseId;
+          if (r.projectPath) cur.projectPath = r.projectPath;
+          cur.desiredState = maxDesiredState(cur.desiredState, r.desiredState);
+        }
       }
-    }
-    writeTracking(tracking);
+    });
     this.startAll();
   }
 
@@ -81,9 +90,7 @@ export class InstanceManager {
     record.pid = launched.pid;
     record.windowHandle = launched.windowHandle;
 
-    const tracking = readTracking();
-    addInstance(tracking, record);
-    writeTracking(tracking);
+    mutateTracking(tracking => addInstance(tracking, record));
     this._applyVisibility(record.windowHandle, record.visibility);
     this._startMonitor(id);
     // Fire-and-forget: don't block the CREATE ack on the capture poll.
@@ -110,13 +117,12 @@ export class InstanceManager {
         if (cwd && norm(cwd) === target) { found = s.sessionId; break; }
       }
       if (found) {
-        const tracking = readTracking();
-        const inst = tracking.instances[instanceId];
-        if (inst && !inst.sessionId) {
+        mutateTracking(tracking => {
+          const inst = tracking.instances[instanceId];
+          if (!inst || inst.sessionId) return false;
           updateInstance(tracking, instanceId, { sessionId: found });
-          writeTracking(tracking);
           console.log(`[instances] captured session ${found} for created instance ${instanceId}`);
-        }
+        });
         return;
       }
       if (attempts < MAX_ATTEMPTS) {
@@ -167,9 +173,7 @@ export class InstanceManager {
       record.pid = null;
       record.windowHandle = null;
       record.externallyHeld = true;
-      const tracking = readTracking();
-      addInstance(tracking, record);
-      writeTracking(tracking);
+      mutateTracking(tracking => addInstance(tracking, record));
       return { success: true, instance: record };
     }
 
@@ -182,41 +186,33 @@ export class InstanceManager {
     record.pid = launched.pid;
     record.windowHandle = launched.windowHandle;
 
-    const tracking = readTracking();
-    addInstance(tracking, record);
-    writeTracking(tracking);
+    mutateTracking(tracking => addInstance(tracking, record));
     this._applyVisibility(record.windowHandle, record.visibility);
     this._startMonitor(id);
     return { success: true, instance: record };
   }
 
   foreground(instanceId) {
-    const tracking = readTracking();
-    const inst = tracking.instances[instanceId];
+    const inst = readTracking().instances[instanceId];
     if (!inst) return { success: false, error: 'Instance not found' };
     if (inst.heldBySubcontroller) return { success: false, error: 'Instance held for report — retry shortly' };
 
     if (inst.externallyHeld || !inst.windowHandle) {
       return { success: false, error: 'No managed window to foreground (externally held or not launched)' };
     }
-    const shown = adapter.showWindow(inst.windowHandle);
-    if (shown) {
-      updateInstance(tracking, instanceId, { visibility: VISIBILITY.FOREGROUND });
-      writeTracking(tracking);
-      return { success: true };
-    }
-    return { success: false, error: 'Window could not be shown (it may have exited)' };
+    const shown = adapter.showWindow(inst.windowHandle); // adapter call outside the lock
+    if (!shown) return { success: false, error: 'Window could not be shown (it may have exited)' };
+    mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { visibility: VISIBILITY.FOREGROUND }); });
+    return { success: true };
   }
 
   hide(instanceId) {
-    const tracking = readTracking();
-    const inst = tracking.instances[instanceId];
+    const inst = readTracking().instances[instanceId];
     if (!inst) return { success: false, error: 'Instance not found' };
 
-    const hidden = adapter.hideWindow(inst.windowHandle);
+    const hidden = adapter.hideWindow(inst.windowHandle); // adapter call outside the lock
     if (hidden) {
-      updateInstance(tracking, instanceId, { visibility: VISIBILITY.HIDDEN });
-      writeTracking(tracking);
+      mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { visibility: VISIBILITY.HIDDEN }); });
     }
     return { success: hidden };
   }
@@ -244,8 +240,7 @@ export class InstanceManager {
       const liveSid = newestSessionInSlugOf(inst.sessionId, claimed);
       if (liveSid && liveSid !== inst.sessionId) {
         console.log(`[instances] ${instanceId}: live session moved ${inst.sessionId.slice(0, 8)} -> ${liveSid.slice(0, 8)}; tracking it`);
-        updateInstance(tracking, instanceId, { sessionId: liveSid, watermark: null });
-        writeTracking(tracking);
+        mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { sessionId: liveSid, watermark: null }); });
         inst.sessionId = liveSid;
         inst.watermark = null;
       }
@@ -267,37 +262,42 @@ export class InstanceManager {
       return { success: false, error: 'No changes since last report — skip', skipped: true };
     }
 
-    updateInstance(tracking, instanceId, { heldBySubcontroller: true });
-    writeTracking(tracking);
+    mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { heldBySubcontroller: true }); });
 
     const result = await runForkReport(inst.sessionId, inst.projectPath);
 
-    const fresh = readTracking();
     if (result.success) {
       if (result.modelUsed && result.modelUsed !== 'session-default') {
         console.log(`[instances] ${instanceId} report used fallback model '${result.modelUsed}'`);
       }
-      updateInstance(fresh, instanceId, {
-        heldBySubcontroller: false,
-        lastReportTime: new Date().toISOString(),
-        lastReportContent: result.report,
-        watermark: result.watermark,
-        reportFailureCount: 0,
-        lastReportError: null,
+      mutateTracking(t => {
+        if (!t.instances[instanceId]) return false;
+        updateInstance(t, instanceId, {
+          heldBySubcontroller: false,
+          lastReportTime: new Date().toISOString(),
+          lastReportContent: result.report,
+          watermark: result.watermark,
+          reportFailureCount: 0,
+          lastReportError: null,
+        });
       });
     } else {
       // Don't advance the watermark (so it retries), but make the persistent
       // failure loud — count it, record the reason, and flag it upward.
-      const count = (inst.reportFailureCount || 0) + 1;
-      console.error(`[instances] REPORT FAILED for ${instanceId} (${inst.name}), attempt ${count}: ${result.error}`);
-      updateInstance(fresh, instanceId, {
-        heldBySubcontroller: false,
-        reportFailureCount: count,
-        lastReportError: result.error,
+      let count = 1;
+      mutateTracking(t => {
+        const i = t.instances[instanceId];
+        if (!i) return false;
+        count = (i.reportFailureCount || 0) + 1;
+        updateInstance(t, instanceId, {
+          heldBySubcontroller: false,
+          reportFailureCount: count,
+          lastReportError: result.error,
+        });
       });
+      console.error(`[instances] REPORT FAILED for ${instanceId} (${inst.name}), attempt ${count}: ${result.error}`);
       this.onEvent({ type: 'report-failed', instanceId, error: result.error, count, attempts: result.attempts });
     }
-    writeTracking(fresh);
 
     return result;
   }
@@ -317,9 +317,7 @@ export class InstanceManager {
     }
     this._probing.add(instanceId);
     try {
-      const t = readTracking();
-      updateInstance(t, instanceId, { heldBySubcontroller: true });
-      writeTracking(t);
+      mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { heldBySubcontroller: true }); });
 
       let result;
       try {
@@ -328,22 +326,22 @@ export class InstanceManager {
         result = { success: false, error: err.message };
       }
 
-      const fresh = readTracking();
       if (result.success) {
-        updateInstance(fresh, instanceId, {
-          heldBySubcontroller: false,
-          lastReportTime: new Date().toISOString(),
-          lastReportContent: result.report,
-          probeMarker: result.marker,
-          reportFailureCount: 0,
-          lastReportError: null,
+        mutateTracking(t => {
+          if (!t.instances[instanceId]) return false;
+          updateInstance(t, instanceId, {
+            heldBySubcontroller: false,
+            lastReportTime: new Date().toISOString(),
+            lastReportContent: result.report,
+            probeMarker: result.marker,
+            reportFailureCount: 0,
+            lastReportError: null,
+          });
         });
-        writeTracking(fresh);
         console.log(`[instances] ${instanceId} (${inst.name}) probe report ok`);
         return { success: true, report: result.report };
       }
-      updateInstance(fresh, instanceId, { heldBySubcontroller: false });
-      writeTracking(fresh);
+      mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { heldBySubcontroller: false }); });
 
       if (result.unchanged) return { success: false, error: 'No changes since last probe — skip', skipped: true };
       if (result.skipped) return { success: false, error: `Probe skipped (${result.reason})`, skipped: true };
@@ -357,28 +355,22 @@ export class InstanceManager {
   }
 
   close(instanceId) {
-    const tracking = readTracking();
-    const inst = tracking.instances[instanceId];
+    const inst = readTracking().instances[instanceId];
     if (!inst) return { success: false, error: 'Instance not found' };
 
-    updateInstance(tracking, instanceId, { desiredState: DESIRED_STATE.CLOSING });
-    writeTracking(tracking);
+    mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { desiredState: DESIRED_STATE.CLOSING }); });
 
     this._stopMonitor(instanceId);
-    adapter.killInstance(inst.pid);
+    adapter.killInstance(inst.pid); // adapter call outside the lock
 
-    const fresh = readTracking();
-    updateInstance(fresh, instanceId, { desiredState: DESIRED_STATE.CLOSED });
-    writeTracking(fresh);
+    mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { desiredState: DESIRED_STATE.CLOSED }); });
 
     return { success: true };
   }
 
   unmanage(instanceId) {
-    const tracking = readTracking();
     this._stopMonitor(instanceId);
-    delete tracking.instances[instanceId];
-    writeTracking(tracking);
+    mutateTracking(t => { delete t.instances[instanceId]; });
     return { success: true };
   }
 
@@ -414,14 +406,15 @@ export class InstanceManager {
 
   _launchAndMonitor(inst) {
     console.log(`[instances] Launching instance ${inst.id} (session: ${inst.sessionId})`);
-    const launched = adapter.launchInstance(inst.id, inst.sessionId, inst.projectPath, { skipPermissions: inst.skipPermissions });
-    const tracking = readTracking();
-    updateInstance(tracking, inst.id, {
-      pid: launched.pid,
-      windowHandle: launched.windowHandle,
-      crashCount: inst.crashCount || 0,
+    const launched = adapter.launchInstance(inst.id, inst.sessionId, inst.projectPath, { skipPermissions: inst.skipPermissions }); // adapter call outside the lock
+    mutateTracking(t => {
+      if (!t.instances[inst.id]) return false;
+      updateInstance(t, inst.id, {
+        pid: launched.pid,
+        windowHandle: launched.windowHandle,
+        crashCount: inst.crashCount || 0,
+      });
     });
-    writeTracking(tracking);
     // Restore the instance's prior visibility (§4.6a): a recovered crash should
     // come back the way it was, not forced visible.
     this._applyVisibility(launched.windowHandle, inst.visibility);
@@ -444,8 +437,7 @@ export class InstanceManager {
     if (this.monitors.has(instanceId)) return;
 
     const interval = setInterval(() => {
-      const tracking = readTracking();
-      const inst = tracking.instances[instanceId];
+      const inst = readTracking().instances[instanceId];
       if (!inst) {
         this._stopMonitor(instanceId);
         return;
@@ -456,10 +448,9 @@ export class InstanceManager {
       // closed, and stop. A bare exit is never a close; only this transition is.
       if (inst.desiredState === DESIRED_STATE.CLOSING) {
         if (adapter.isProcessAlive(inst.pid)) {
-          adapter.killInstance(inst.pid);
+          adapter.killInstance(inst.pid); // adapter call outside the lock
         }
-        updateInstance(tracking, instanceId, { desiredState: DESIRED_STATE.CLOSED });
-        writeTracking(tracking);
+        mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { desiredState: DESIRED_STATE.CLOSED }); });
         this._stopMonitor(instanceId);
         this.onEvent({ type: 'closed', instanceId });
         return;
@@ -474,27 +465,26 @@ export class InstanceManager {
       // means a genuinely dead session (no zombie window to confuse us).
       if (!adapter.isProcessAlive(inst.pid)) {
         console.log(`[instances] Instance ${instanceId} (pid=${inst.pid}) died — crash recovery`);
-        inst.crashCount = (inst.crashCount || 0) + 1;
+        const newCount = (inst.crashCount || 0) + 1;
 
-        if (inst.crashCount > config.CRASH_RETRY_MAX) {
+        if (newCount > config.CRASH_RETRY_MAX) {
           console.log(`[instances] Instance ${instanceId} exceeded crash limit — marking failed`);
-          updateInstance(tracking, instanceId, { desiredState: DESIRED_STATE.FAILED });
-          writeTracking(tracking);
+          mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { desiredState: DESIRED_STATE.FAILED, crashCount: newCount }); });
           this._stopMonitor(instanceId);
-          this.onEvent({ type: 'crash-failed', instanceId, crashCount: inst.crashCount });
+          this.onEvent({ type: 'crash-failed', instanceId, crashCount: newCount });
           return;
         }
 
-        updateInstance(tracking, instanceId, { crashCount: inst.crashCount });
-        writeTracking(tracking);
+        mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { crashCount: newCount }); });
 
         // Stop monitoring during the relaunch so we don't double-fire while the
         // new window is still coming up (launch polls up to ~12s for its handle).
         this._stopMonitor(instanceId);
-        const delay = config.CRASH_RETRY_BASE_MS * Math.pow(2, inst.crashCount - 1);
+        inst.crashCount = newCount; // carry the bumped count into the relaunch
+        const delay = config.CRASH_RETRY_BASE_MS * Math.pow(2, newCount - 1);
         setTimeout(() => {
           this._launchAndMonitor(inst);
-          this.onEvent({ type: 'crash-recovery', instanceId, crashCount: inst.crashCount });
+          this.onEvent({ type: 'crash-recovery', instanceId, crashCount: newCount });
         }, delay);
       }
     }, 5000);

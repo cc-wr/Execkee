@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, readdirSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, readdirSync, unlinkSync, statSync } from 'fs';
 import { dirname, basename, join } from 'path';
 
 // Robust JSON persistence shared by the life-tasks store (store.js) and the instance
@@ -55,6 +55,41 @@ export function readJsonSafe(path, fallback, label) {
     }
     return fallback;
   }
+}
+
+// Cross-process advisory lock around a store's read-modify-write, so separate
+// processes (e.g. the workhorse and each per-instance hook, all writing the same
+// tracking.json) can't interleave their RMW and lose-update an instance. Held only
+// around a SHORT synchronous read+modify+write — never across adapter calls or awaits.
+// Degrades to "proceed unlocked" on timeout/error rather than ever deadlocking (the
+// atomic write + guards still prevent the catastrophic case; only a rare lost-update
+// can slip if the lock is contended for seconds, which shouldn't happen).
+export function acquireLock(targetPath, { timeoutMs = 4000, staleMs = 15000 } = {}) {
+  const lock = `${targetPath}.lock`;
+  const start = Date.now();
+  for (;;) {
+    try {
+      writeFileSync(lock, `${process.pid} ${Date.now()}`, { flag: 'wx' });
+      return lock;
+    } catch (err) {
+      if (err.code !== 'EEXIST') {
+        console.error(`[safe-fs] lock ${basename(lock)} error: ${err.message}; proceeding unlocked`);
+        return null;
+      }
+      // Stale-holder reclaim: a lock older than staleMs means its holder probably died
+      // mid-operation — steal it.
+      try { if (Date.now() - statSync(lock).mtimeMs > staleMs) { unlinkSync(lock); continue; } } catch {}
+      if (Date.now() - start > timeoutMs) {
+        console.error(`[safe-fs] lock ${basename(lock)} busy >${timeoutMs}ms; proceeding unlocked`);
+        return null;
+      }
+      sleepSync(15);
+    }
+  }
+}
+
+export function releaseLock(lock) {
+  if (lock) { try { unlinkSync(lock); } catch {} }
 }
 
 // Keep a small rolling set of timestamped backups beside `path` (copy current -> .bak-<ts>,
