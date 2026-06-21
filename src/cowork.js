@@ -437,7 +437,9 @@ async function llmDeferralSuppress(items, defs) {
     ...defs.map(d => `- ${d.topic}${d.until ? ` (until ${d.until})` : ''}`),
     '',
     'Candidate action items (id: text):',
-    ...items.map(p => `- ${p.id}: ${p.text}`),
+    // iss-4: include the originating instance so deferring by instance/bug id (e.g.
+    // "412651") suppresses its items even when the id lives only in the instance name.
+    ...items.map(p => `- ${p.id}: ${p.text}${p.instance ? ` [from instance: ${p.instance}]` : ''}`),
     '',
     'For EACH candidate, decide whether it is about / related to any deferred topic —',
     'the same subject, project, person, deliverable, or obligation the user put on hold.',
@@ -465,7 +467,9 @@ async function filterDeferredItems(items, today) {
   const suppress = await llmDeferralSuppress(list, defs);
   if (suppress) return list.filter(p => !suppress.has(String(p.id)));
   // Model unavailable/unparseable — best-effort text match so suppression still happens.
-  return list.filter(p => !isDeferred(p.text, defs));
+  // iss-4: also match the originating instance name, so deferring by instance/bug id
+  // suppresses its items even when the text doesn't carry that id.
+  return list.filter(p => !isDeferred(p.text, defs) && !(p.instance && isDeferred(p.instance, defs)));
 }
 
 export async function addDeferral(topic, until) {
@@ -664,7 +668,7 @@ async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports
           due: t.due || null,
           urgency: t.urgency || 'normal',
         })).filter(t => t.text),
-        dailyTasks.tasks
+        readLifeTasks().tasks   // full backlog incl. completed history (iss-3)
       ),
       rawThinking: parsed.thinking || '',
     };
@@ -826,7 +830,7 @@ function buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueToda
       presumedTasks.push({ id: `presumed-${presumedTasks.length}`, instance: r.name, text: x, due: null, urgency: 'normal' });
     }
   }
-  presumedTasks = dedupePresumedTasks(presumedTasks, dailyTasks && dailyTasks.tasks);
+  presumedTasks = dedupePresumedTasks(presumedTasks, readLifeTasks().tasks); // full backlog (iss-3)
 
   return {
     timestamp: cycleTime,
@@ -838,17 +842,36 @@ function buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueToda
   };
 }
 
-// Drop presumed tasks that duplicate an existing task (or each other). Exact
-// normalized match (trim + lowercase + collapse whitespace) — conservative, so
-// it never hides a legitimately distinct item.
+// Drop presumed tasks that duplicate a backlog task (or each other). iss-3: was
+// exact-normalized-match only, so a task the instance report REWORDED — including a
+// completed one — still surfaced. Now relatedness = exact / substring / all the
+// significant (>3-char) words of one appearing in the other (the same by-name
+// discipline as matchInstance). Callers pass the FULL backlog (incl. completed
+// history), so finished work is deduped out even when its wording differs.
 function dedupePresumedTasks(presumed, tasks) {
   const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-  const existing = new Set((tasks || []).map(t => norm(t.text)));
-  const seen = new Set();
+  const sig = (s) => s.split(' ').filter(w => w.length > 3);
+  // Strict: same / substring / ALL significant words of one in the other — used vs
+  // ACTIVE tasks (won't hide a legitimately distinct live item).
+  const strict = (a, b) => {
+    if (a === b || a.includes(b) || b.includes(a)) return true;
+    const wa = sig(a), wb = sig(b);
+    return (wa.length >= 2 && wa.every(w => b.includes(w))) || (wb.length >= 2 && wb.every(w => a.includes(w)));
+  };
+  // Looser: >= 2 shared significant words — used ONLY vs COMPLETED tasks, where a
+  // resurfaced near-duplicate of finished work is the bug (iss-3); the small
+  // over-match risk is acceptable for done work and the user can re-add if needed.
+  const shareN = (a, b, n) => { const wb = new Set(sig(b)); return sig(a).filter(w => wb.has(w)).length >= n; };
+  const active = [], done = [];
+  for (const t of (tasks || [])) { const k = norm(t.text); if (!k) continue; (t.completedAt ? done : active).push(k); }
+  const seen = [];
   return (presumed || []).filter(p => {
     const k = norm(p.text);
-    if (!k || existing.has(k) || seen.has(k)) return false;
-    seen.add(k);
+    if (!k) return false;
+    if (active.some(tk => strict(k, tk))) return false;                 // dup of an active task
+    if (done.some(tk => strict(k, tk) || shareN(k, tk, 2))) return false; // dup of a completed task
+    if (seen.some(sk => strict(k, sk))) return false;                   // dup of another presumed item
+    seen.push(k);
     return true;
   });
 }
