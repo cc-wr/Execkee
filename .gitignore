@@ -1,2 +1,15 @@
 node_modules/
 *.tmp
+
+# Local Claude Code overrides (machine/user-specific — not for the public repo)
+.claude/settings.local.json
+
+# Execkee runtime data must never be committed (it lives in ~/.execkee by default;
+# this guards against EXECKEE_DATA_DIR pointing into the repo during local testing).
+.execkee/
+*.log
+*.execkee-bak
+*.execkee-tmp
+
+# OS noise
+.DS_Store

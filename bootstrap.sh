@@ -6,10 +6,10 @@
 # copy), runs npm install, and launches the workhorse pointed at your controller.
 #
 #   curl -fsSL https://raw.githubusercontent.com/cc-wr/Execkee/master/bootstrap.sh \
-#     | bash -s -- --controller 100.79.227.109:7700 --name "Mac-Workhorse"
+#     | bash -s -- --controller <controller-host>:7700 --name "Mac-Workhorse"
 #
 #   # or, if you downloaded this file:
-#   bash ./bootstrap.sh --controller 100.79.227.109:7700 --name "Mac-Workhorse"
+#   bash ./bootstrap.sh --controller <controller-host>:7700 --name "Mac-Workhorse"
 #
 # After it runs once, future starts are just: ./execkee-workhorse.sh --controller <addr>
 #
@@ -156,7 +156,7 @@ ensure_repo() {
 # --- main ---
 info "Execkee setup — mode: $MODE, install dir: $INSTALL_DIR"
 [ "$MODE" = "workhorse" ] || die "bootstrap.sh supports --mode workhorse only on macOS. The controller + primary surface run on Windows (bootstrap.ps1)."
-[ -n "$CONTROLLER" ] || die "Workhorse mode needs --controller <host:port> (e.g. 100.79.227.109:7700)."
+[ -n "$CONTROLLER" ] || die "Workhorse mode needs --controller <host:port> (e.g. 192.168.1.50:7700)."
 
 ensure_node
 ensure_claude

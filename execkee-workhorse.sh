@@ -5,8 +5,8 @@
 # controller and keeps the subcontroller running. You only touch this machine;
 # the controller needs no prior configuration.
 #
-#   ./execkee-workhorse.sh --controller 100.79.227.109:7700 --name "Mac-Workhorse"
-#   ./execkee-workhorse.sh 100.79.227.109:7700 "Mac-Workhorse"     # positional also works
+#   ./execkee-workhorse.sh --controller <controller-host>:7700 --name "Mac-Workhorse"
+#   ./execkee-workhorse.sh <controller-host>:7700 "Mac-Workhorse"     # positional also works
 #   ./execkee-workhorse.sh --controller localhost:7700
 
 set -euo pipefail

@@ -12,8 +12,8 @@ for the full design and its codicils.
 
 | Role | Machine | Location | Address | Notes |
 |------|---------|----------|---------|-------|
-| **Controller** | `cscoo` | `C:\Users\cscoo\Execkee` | Tailscale **100.79.227.109:7700** | Runs server (hub + dashboard `:7701` + 30-min cycle) + the primary Claude window. **Brain-only** (no co-located workhorse). |
-| **Workhorse** | dev machine (`ccooley`) | `C:\Users\ccooley\Downloads\Execkee` | Tailscale `100.66.17.19` | `wh-ccooleypersonal` / "Workhorse-2". Runs/reports managed instances on this machine. |
+| **Controller** | controller machine | `%USERPROFILE%\Execkee` | Tailscale **<controller-host>:7700** | Runs server (hub + dashboard `:7701` + 30-min cycle) + the primary Claude window. **Brain-only** (no co-located workhorse). |
+| **Workhorse** | dev machine | `%USERPROFILE%\Execkee` | Tailscale `<workhorse-host>` | e.g. `wh-<hostname>` / "Workhorse-2". Runs/reports managed instances on this machine. |
 
 - The two connect over **Tailscale** on port **7700** (verified reachable + registered). The LAN firewall rule for 7700 was **not** opened on the controller — use the Tailscale IPs, not the LAN IPs.
 - Repo: **github.com/cc-wr/Execkee**, branch `master`, committed as `cc-wr`.
@@ -45,8 +45,8 @@ for the full design and its codicils.
 
 ## Operating quick-reference
 
-- **Controller (cscoo):** `irm https://raw.githubusercontent.com/cc-wr/Execkee/master/bootstrap.ps1 | iex` then `\.\execkee-controller.ps1` (brain-only by default; add `-WithLocalWorkhorse` only for single-machine). Leave the window open.
-- **Workhorse (this machine):** `\.\execkee-workhorse.ps1 -ControllerAddress 100.79.227.109:7700 -Name "Workhorse-2"` from the dev repo.
+- **Controller:** `irm https://raw.githubusercontent.com/cc-wr/Execkee/master/bootstrap.ps1 | iex` then `\.\execkee-controller.ps1` (brain-only by default; add `-WithLocalWorkhorse` only for single-machine). Leave the window open.
+- **Workhorse (this machine):** `\.\execkee-workhorse.ps1 -ControllerAddress <controller-host>:7700 -Name "Workhorse-2"` from the dev repo.
 - **Talk to the primary** (on the controller) in natural language, or use the CLI there:
   - `node src/cli.js sessions [--all]` — adoptable sessions per workhorse
   - `node src/cli.js manage <session-id> [name] [--on <wh>]` — adopt (auto-routes to the session's workhorse)
@@ -131,7 +131,7 @@ closed/failed ones release it back to adoptable (`hub.listSessions`).
 
 - Multi-machine session discovery: loopback (server + workhorse, isolated data dir) — `sessions` returned 66 real sessions grouped by workhorse via the `LIST_SESSIONS` round-trip.
 - Workhorse↔controller link over Tailscale: connected + registered + received SYNC.
-- Bootstrap on a fresh Restricted machine (cscoo): Node/Claude/Git present, login gate, `git clone`, `npm ci` (after the execution-policy fix) — controller came up.
+- Bootstrap on a fresh Restricted machine (controller): Node/Claude/Git present, login gate, `git clone`, `npm ci` (after the execution-policy fix) — controller came up.
 - Un-adopt: loopback adopt (`--open`) → `unmanage` → instance removed from master and stayed removed across state-updates.
 - Heartbeat dead-detection: a deliberately silent client was dropped by the hub after ~3 intervals.
 - `resolveSessionId('de9066ff')` → full id (short-id adoption); session-less launch no longer crash-loops (regenerated helper parses clean).

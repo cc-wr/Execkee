@@ -4,7 +4,7 @@
 # required: this drops a per-user LaunchAgent in ~/Library/LaunchAgents. The bash
 # analog of scripts/install-startup.ps1. Remove with --uninstall.
 #
-#   ./scripts/install-startup.sh --controller 100.79.227.109:7700 --name "Mac-Workhorse"
+#   ./scripts/install-startup.sh --controller <controller-host>:7700 --name "Mac-Workhorse"
 #   ./scripts/install-startup.sh --uninstall
 #
 # IMPORTANT — macOS Automation (TCC) permission, one-time and manual:

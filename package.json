@@ -1,8 +1,38 @@
 {
   "name": "execkee",
   "version": "0.1.0",
-  "description": "Claude Code Life Manager — controller-and-workhorse-pool system",
+  "description": "Claude Code Life Manager — a controller-and-workhorse fleet supervisor for long-lived Claude Code instances",
   "type": "module",
+  "license": "MIT",
+  "author": "cc-wr",
+  "homepage": "https://github.com/cc-wr/Execkee#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cc-wr/Execkee.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cc-wr/Execkee/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "claude",
+    "anthropic",
+    "agent-orchestration",
+    "fleet-supervisor",
+    "llm-agents",
+    "process-supervisor",
+    "remote-control",
+    "websocket",
+    "dashboard",
+    "task-manager",
+    "life-manager",
+    "cli",
+    "tailscale",
+    "multi-machine"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "server": "node src/server/index.js",
     "workhorse": "node src/workhorse/index.js",

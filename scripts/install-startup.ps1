@@ -4,7 +4,7 @@
 #
 #   .\scripts\install-startup.ps1                                   (controller, brain-only)
 #   .\scripts\install-startup.ps1 -WithLocalWorkhorse               (controller + co-located workhorse)
-#   .\scripts\install-startup.ps1 -Mode workhorse -ControllerAddress 100.79.227.109:7700 -Name "Workhorse-2"
+#   .\scripts\install-startup.ps1 -Mode workhorse -ControllerAddress <controller-host>:7700 -Name "Workhorse-2"
 #   .\scripts\install-startup.ps1 -Uninstall
 #
 # Note: this runs at LOGON (no admin). For before-logon / service-style startup, a
@@ -30,7 +30,7 @@ if ($Uninstall) {
 }
 
 if ($Mode -eq 'workhorse' -and -not $ControllerAddress) {
-  Write-Error "Workhorse mode needs -ControllerAddress <host:port> (e.g. 100.79.227.109:7700)."
+  Write-Error "Workhorse mode needs -ControllerAddress <host:port> (e.g. 192.168.1.50:7700)."
   exit 1
 }
 
