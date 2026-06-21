@@ -83,9 +83,9 @@ dashboard.onListDeferrals = async () => {
 };
 
 // Scheduled guesses: surface a user-specified task as a tentative guess on a date.
-dashboard.onScheduleGuess = async ({ text, on, until, horizon }) => {
+dashboard.onScheduleGuess = async ({ text, on, until, horizon, every, confirmed }) => {
   const { addScheduledGuess } = await import('../cowork.js');
-  const result = await addScheduledGuess(text, on, until, !horizon);
+  const result = await addScheduledGuess(text, on, until, !horizon, { every, confirmed }); // every: iss-6, confirmed: iss-7
   dashboard.pushUpdate();
   return result;
 };

@@ -384,21 +384,29 @@ switch (cmd) {
     break;
   }
 
-  case 'schedule-guess': {
-    // schedule-guess <text...> --on YYYY-MM-DD [--until YYYY-MM-DD] [--horizon]
-    let on = null, until = null, horizon = false;
+  case 'schedule-guess':
+  case 'schedule-task': {
+    // schedule-guess "<text>" --on YYYY-MM-DD [--until YYYY-MM-DD] [--horizon]
+    //                         [--every weekly|daily|Nd] [--confirmed]
+    // schedule-task is an alias that implies --confirmed (lands as a real backlog task,
+    // not a tentative guess). --every makes it recur (iss-6); --confirmed = iss-7.
+    let on = null, until = null, horizon = false, every = null, confirmed = (cmd === 'schedule-task');
     const textParts = [];
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
       if (a === '--on') on = args[++i] || null;
       else if (a === '--until') until = args[++i] || null;
       else if (a === '--horizon') horizon = true;
+      else if (a === '--every') every = args[++i] || null;
+      else if (a === '--confirmed' || a === '--task') confirmed = true;
       else textParts.push(a);
     }
     const text = textParts.join(' ').trim();
-    if (!text || !on) { console.log('Usage: schedule-guess "<text>" --on YYYY-MM-DD [--until YYYY-MM-DD] [--horizon]'); break; }
-    const result = await api('/api/schedule-guess', 'POST', { text, on, until, horizon });
-    console.log(result.success !== false ? `Scheduled guess "${text}" starting ${on}${until ? ` until ${until}` : ''}${horizon ? ' (horizon)' : ''}.` : `Failed: ${result.error}`);
+    if (!text || !on) { console.log('Usage: schedule-guess "<text>" --on YYYY-MM-DD [--until YYYY-MM-DD] [--horizon] [--every weekly|daily|Nd] [--confirmed]'); break; }
+    const result = await api('/api/schedule-guess', 'POST', { text, on, until, horizon, every, confirmed });
+    console.log(result.success !== false
+      ? `Scheduled ${confirmed ? 'task' : 'guess'} "${text}" starting ${on}${until ? ` until ${until}` : ''}${every ? ` every ${every}` : ''}${horizon ? ' (horizon)' : ''}.`
+      : `Failed: ${result.error}`);
     break;
   }
 

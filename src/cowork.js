@@ -28,6 +28,7 @@ export async function runCoworkCycle(hub) {
   // tentative task list from the tracked files (once per day).
   const tracking = readTracking();
   const instances = Object.values(tracking.instances);
+  promoteDueConfirmed(today); // iss-7: land any due confirmed scheduled tasks into the backlog first
   const lifeTasks = readLifeTasks();
   const contextSources = readContextSources();
   const plan = await buildDailyPlan({ today, lifeTasks, instances, contextBlock: contextSources });
@@ -311,6 +312,7 @@ async function buildDailyPlan({ today, lifeTasks, instances, contextBlock, force
 // Fork-free rebuild (instant task refresh + approval mutations): refresh the backlog
 // portion + statuses, preserve existing guesses (no re-guess), re-match instances.
 function rebuildPlanSync(today, instances) {
+  promoteDueConfirmed(today); // iss-7: due confirmed scheduled tasks land in the backlog before the rebuild
   const lifeTasks = readLifeTasks();
   const instanceNames = instances
     .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
@@ -364,7 +366,7 @@ export function approveTask(id) {
   const item = (plan.items || []).find(i => i.id === id && i.tentative);
   if (!item) return { success: false, error: `No tentative task with id ${id}` };
   promoteToBacklog([item]);
-  if (item.scheduledId) removeScheduledGuess(item.scheduledId); // consumed — don't re-inject
+  if (item.scheduledId) consumeScheduledGuess(item.scheduledId, today); // recurring advances; one-time removed
   const p = rebuildPlanSync(today, Object.values(readTracking().instances));
   writePlanToDashboard(p);
   return { success: true, promoted: item.text };
@@ -376,7 +378,7 @@ export function approveAllTentative() {
   const tentatives = (plan.items || []).filter(i => i.tentative);
   if (!tentatives.length) return { success: true, approved: 0 };
   promoteToBacklog(tentatives);
-  for (const t of tentatives) if (t.scheduledId) removeScheduledGuess(t.scheduledId);
+  for (const t of tentatives) if (t.scheduledId) consumeScheduledGuess(t.scheduledId, today);
   const p = rebuildPlanSync(today, Object.values(readTracking().instances));
   writePlanToDashboard(p);
   return { success: true, approved: tentatives.length };
@@ -387,7 +389,7 @@ export function rejectTask(id) {
   const plan = readDailyPlan();
   const item = (plan.items || []).find(i => i.id === id && i.tentative);
   if (!item) return { success: false, error: `No tentative task with id ${id}` };
-  if (item.scheduledId) removeScheduledGuess(item.scheduledId); // stop it re-injecting
+  if (item.scheduledId) consumeScheduledGuess(item.scheduledId, today); // recurring advances; one-time removed
   plan.items = (plan.items || []).filter(i => !(i.id === id && i.tentative));
   writeDailyPlan(plan);
   const p = rebuildPlanSync(today, Object.values(readTracking().instances));
@@ -526,11 +528,77 @@ export function listDeferrals() {
   return readDeferrals().deferrals || [];
 }
 
-// ---- Scheduled guesses: surface a user-specified task as a tentative guess on a date ----
+// ---- Scheduled guesses: surface a user-specified task on/after a date ----
+// A scheduled entry can be: one-time (default) or RECURRING (everyDays, iss-6); and
+// surfaced as a tentative GUESS (default) or promoted as a CONFIRMED backlog task
+// (confirmed, iss-7). Date math on YYYY-MM-DD strings, UTC-anchored (matches localDateStr).
+
+function dayDiffYmd(fromYmd, toYmd) {
+  return Math.round((Date.parse(toYmd + 'T00:00:00Z') - Date.parse(fromYmd + 'T00:00:00Z')) / 86400000);
+}
+function addDaysYmd(ymd, n) {
+  return new Date(Date.parse(ymd + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+}
+// Parse a recurrence spec to a day period: 'weekly'->7, 'daily'->1, 'Nd'/'N'->N, else null.
+function parseEvery(s) {
+  if (!s) return null;
+  s = String(s).trim().toLowerCase();
+  if (s === 'weekly') return 7;
+  if (s === 'daily') return 1;
+  const m = s.match(/^(\d+)\s*d?$/);
+  if (m) { const n = parseInt(m[1], 10); return n > 0 ? n : null; }
+  return null;
+}
+// Is a recurring entry due today (this occurrence not yet handled)? The current
+// occurrence date is the latest cadence point <= today; it's due until lastHandled
+// catches up to it (approve/reject sets lastHandled, advancing to the next occurrence).
+function recurringDue(e, today) {
+  const per = e.everyDays;
+  if (!per || !e.startDate || e.startDate > today || (e.until && e.until < today)) return false;
+  const ds = dayDiffYmd(e.startDate, today);
+  if (ds < 0) return false;
+  const occDate = addDaysYmd(e.startDate, Math.floor(ds / per) * per);
+  return !e.lastHandled || e.lastHandled < occDate;
+}
+function entryDue(e, today) {
+  if (e.everyDays) return recurringDue(e, today);
+  return !!(e.startDate && e.startDate <= today && (!e.until || e.until >= today));
+}
 
 function activeScheduledGuesses(today) {
   const { items } = readScheduledGuesses();
-  return (items || []).filter(e => e && e.text && e.startDate && e.startDate <= today && (!e.until || e.until >= today) && !e.deferred);
+  // Confirmed entries are promoted to the backlog (promoteDueConfirmed), not surfaced
+  // as tentative guesses; deferred ones are held.
+  return (items || []).filter(e => e && e.text && !e.deferred && !e.confirmed && entryDue(e, today));
+}
+
+// iss-7: promote due CONFIRMED scheduled entries into the backlog (tasks.json) as real
+// tasks. One-time entries are removed after promoting; recurring ones advance their
+// occurrence (lastHandled) so they re-add on the next cadence. Idempotent per occurrence.
+function promoteDueConfirmed(today) {
+  const data = readScheduledGuesses();
+  const items = data.items || [];
+  const toPromote = [];
+  let changed = false;
+  for (const e of items) {
+    if (!e.confirmed || !entryDue(e, today)) continue;
+    toPromote.push({ text: e.text, due: e.due || null, priority: e.priority || 'normal' });
+    if (e.everyDays) { e.lastHandled = today; changed = true; }
+    else { e.__remove = true; changed = true; }
+  }
+  if (toPromote.length) promoteToBacklog(toPromote);
+  if (changed) { data.items = items.filter(e => !e.__remove); writeScheduledGuesses(data); }
+}
+
+// approve/reject of a scheduled-guess occurrence: a recurring entry advances to its
+// next occurrence (mark handled); a one-time entry is consumed (removed) so it doesn't
+// re-inject. (iss-6: recurring guesses must survive approve/reject.)
+function consumeScheduledGuess(scheduledId, today) {
+  const data = readScheduledGuesses();
+  const e = (data.items || []).find(x => x.id === scheduledId);
+  if (!e) return;
+  if (e.everyDays) { e.lastHandled = today; writeScheduledGuesses(data); }
+  else { data.items = (data.items || []).filter(x => x.id !== scheduledId); writeScheduledGuesses(data); }
 }
 
 // Keep each scheduled guess's `deferred` flag current vs the active deferrals (LLM
@@ -573,24 +641,27 @@ function withScheduledGuesses(guesses, today) {
   return [...(guesses || []), ...inject];
 }
 
-export async function addScheduledGuess(text, startDate, until, today) {
+export async function addScheduledGuess(text, startDate, until, today, opts = {}) {
   text = String(text || '').trim();
   if (!text) return { success: false, error: 'empty text' };
   if (!startDate) return { success: false, error: 'startDate required (--on YYYY-MM-DD)' };
+  const everyDays = parseEvery(opts.every);          // iss-6: recurrence (weekly/daily/Nd)
+  const confirmed = !!opts.confirmed;                // iss-7: land as a real backlog task, not a guess
   const data = readScheduledGuesses();
   data.items = data.items || [];
   const id = `sg-${Date.now().toString(36)}`;
-  data.items.push({ id, text, startDate, until: until || null, today: today !== false, priority: 'normal', createdAt: new Date().toISOString() });
+  data.items.push({ id, text, startDate, until: until || null, today: today !== false, priority: 'normal', everyDays: everyDays || null, confirmed, lastHandled: null, createdAt: new Date().toISOString() });
   writeScheduledGuesses(data);
-  // If it's already due, surface it on the dashboard right away (else it appears when its
-  // date arrives). Reconcile first so it isn't surfaced if it matches an active hold.
+  // If it's already due, act right away (else it appears when its date arrives): a
+  // confirmed entry promotes to the backlog; a guess is reconciled vs holds + surfaced.
   const t = localDateStr();
-  if (startDate <= t) {
-    await reconcileScheduledDeferrals(t);
+  if (entryDue({ startDate, until: until || null, everyDays }, t)) {
+    if (confirmed) promoteDueConfirmed(t);
+    else await reconcileScheduledDeferrals(t);
     const p = rebuildPlanSync(t, Object.values(readTracking().instances));
     writePlanToDashboard(p);
   }
-  return { success: true, id, text, startDate, until: until || null };
+  return { success: true, id, text, startDate, until: until || null, every: everyDays || null, confirmed };
 }
 
 export function removeScheduledGuess(idOrText) {
