@@ -80,25 +80,20 @@ function idleStableNorm(frame) {
     .join('\n').replace(/\n{2,}/g, '\n').trim();
 }
 
-// Lines after the last marker that are real content (not the input box / status
-// chrome). If none, the session hasn't advanced since that marker was printed.
+// Has the conversation advanced since our last probe? Chrome-agnostic check: scan the
+// recent TAIL of the (cleaned) frame for the last probe's marker. If it's still there,
+// only short chrome (input box, status bar, the "Baked for Ns" footer) sits below it
+// => unchanged. A real new turn is long enough to push the marker up out of the tail
+// => advanced. This avoids classifying TUI chrome line by line — which kept letting a
+// new footer string defeat the guard and re-probe an unchanged session every cycle.
+// Errs toward "unchanged/skip" for a very short new turn (caught a cycle later as more
+// accumulates) — the safe direction, since the complaint was over-probing. clean()
+// keeps the ASCII markers intact while dropping box-drawing, so the tail char-count
+// is stable.
 function hasNewContentAfter(frame, marker) {
   if (!marker) return true;
-  // Clean first: the TUI's input-box borders (╭─╮ │ ╰─╯) sit AFTER the marker on
-  // an idle screen; uncleaned they read as "new content" and the unchanged-skip
-  // never fires (re-probing the user's conversation every cycle). clean() maps
-  // box-drawing to spaces so a border line collapses to '' / '>' and is skipped.
-  const lines = frame.split('\n').map(clean);
-  let idx = -1;
-  for (let i = 0; i < lines.length; i++) if (lines[i].includes(marker)) idx = i;
-  if (idx < 0) return true; // marker scrolled off => conversation advanced
-  for (const t of lines.slice(idx + 1)) {
-    if (t.length <= 3) continue;            // blank / collapsed border / lone '>'
-    if (t.startsWith('>')) continue;        // input prompt line
-    if (CHROME_RE.test(t)) continue;
-    return true; // a fresh turn after the marker
-  }
-  return false;
+  const cleaned = frame.split('\n').map(clean).join('\n');
+  return !cleaned.slice(-config.PROBE_UNCHANGED_TAIL_CHARS).includes(marker);
 }
 
 function buildPrompt(begin, end) {

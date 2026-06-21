@@ -88,6 +88,11 @@ export default Object.freeze({
   // within this window or the probe is judged "not accepted" (TUI not behaving as
   // expected, e.g. the prompt never submitted) and falls back to the fork report.
   PROBE_ACCEPT_MS: Number(process.env.EXECKEE_PROBE_ACCEPT_MS) || 60_000,
+  // Unchanged-guard: a session counts as unchanged (skip re-probing) while the last
+  // probe's marker is still within this many chars of the frame's tail. Short chrome
+  // (input box, status bar, "Baked for Ns" footer) keeps it there; a real new turn
+  // pushes it out. Chrome-agnostic — no need to enumerate TUI footer strings.
+  PROBE_UNCHANGED_TAIL_CHARS: Number(process.env.EXECKEE_PROBE_TAIL_CHARS) || 1200,
 
   WINDOW_TITLE_PREFIX: 'Execkee',
 });
