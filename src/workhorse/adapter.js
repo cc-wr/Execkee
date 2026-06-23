@@ -33,3 +33,6 @@ export const hideWindow = impl.hideWindow;
 export const showWindow = impl.showWindow;
 export const isWindowVisible = impl.isWindowVisible;
 export const killInstance = impl.killInstance;
+// Optional: find an already-running window resuming a session (orphan reuse on adopt).
+// A platform impl that doesn't support it omits it — callers must null-guard.
+export const findSessionWindow = impl.findSessionWindow || (() => null);

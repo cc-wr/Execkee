@@ -177,19 +177,33 @@ export class InstanceManager {
       return { success: true, instance: record };
     }
 
-    // Common case (not currently open): resume it, verify the launch, and only
-    // THEN persist — adoption is atomic, no partial/orphan record on failure.
-    const launched = adapter.launchInstance(id, sessionId, effectivePath, { skipPermissions });
-    if (!launched.pid) {
-      return { success: false, error: 'Launch failed — session not adopted' };
+    // #1: if a claude window is ALREADY resuming this session (an orphan from a run we
+    // lost track of), REUSE it rather than launch a duplicate — re-adopting after a
+    // tracking loss attaches to the live window instead of piling up windows. Its handle
+    // is null when the window is hidden (monitorable by pid; hide/show works again after
+    // a relaunch). Falls back to a normal launch when nothing is already running it.
+    const existing = adapter.findSessionWindow(sessionId);
+    let reused = false;
+    if (existing && adapter.isProcessAlive(existing.pid)) {
+      record.pid = existing.pid;
+      record.windowHandle = existing.windowHandle;
+      reused = true;
+      console.log(`[instances] re-attached ${id} to a running window pid=${existing.pid} (session ${sessionId.slice(0, 8)})`);
+    } else {
+      // Not currently running: resume it, verify the launch, and only THEN persist —
+      // adoption is atomic, no partial/orphan record on failure.
+      const launched = adapter.launchInstance(id, sessionId, effectivePath, { skipPermissions });
+      if (!launched.pid) {
+        return { success: false, error: 'Launch failed — session not adopted' };
+      }
+      record.pid = launched.pid;
+      record.windowHandle = launched.windowHandle;
     }
-    record.pid = launched.pid;
-    record.windowHandle = launched.windowHandle;
 
     mutateTracking(tracking => addInstance(tracking, record));
     this._applyVisibility(record.windowHandle, record.visibility);
     this._startMonitor(id);
-    return { success: true, instance: record };
+    return { success: true, instance: record, reused };
   }
 
   foreground(instanceId) {

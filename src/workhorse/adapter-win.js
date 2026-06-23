@@ -58,7 +58,8 @@ param(
     [string]$Cwd = ".",
     [string]$ArgString = "",
     [string]$InstanceId = "",
-    [string]$DataDir = ""
+    [string]$DataDir = "",
+    [string]$SessionId = ""
 )
 
 Add-Type @"
@@ -159,6 +160,24 @@ switch ($Action) {
         & taskkill.exe /PID $ProcId /T /F 2>$null | Out-Null
         Write-Output "ok"
     }
+    "findsession" {
+        # Find a running claude.exe whose command line resumes this session id (an
+        # orphan from a prior run we lost track of). Returns "<pid> <handle>" of the
+        # first match (handle 0 if the window is hidden), or "0 0" if none.
+        $procId = 0; $h = 0
+        if ($SessionId -and $SessionId.Length -gt 0) {
+            $esc = [regex]::Escape($SessionId)
+            $match = Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction SilentlyContinue |
+                     Where-Object { $_.CommandLine -and $_.CommandLine -match $esc } |
+                     Select-Object -First 1
+            if ($match) {
+                $procId = $match.ProcessId
+                $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+                if ($proc) { $proc.Refresh(); if ($proc.MainWindowHandle -ne [IntPtr]::Zero) { $h = [int64]$proc.MainWindowHandle } }
+            }
+        }
+        Write-Output "$procId $h"
+    }
 }
 `;
 
@@ -251,4 +270,17 @@ export function isWindowVisible(windowHandle) {
 export function killInstance(pid) {
   if (!pid) return false;
   return runHelper({ Action: 'kill', ProcId: pid }) === 'ok';
+}
+
+// Find an already-running claude window resuming `sessionId` (an orphan from a prior
+// run we lost track of). Lets adoption REUSE it instead of launching a duplicate. The
+// window handle is 0/null if the window is hidden (then it can't be hidden/shown until
+// a relaunch, but its pid is still monitorable). Returns { pid, windowHandle } or null.
+export function findSessionWindow(sessionId) {
+  if (!sessionId) return null;
+  const out = runHelper({ Action: 'findsession', SessionId: sessionId });
+  const [pidStr, handleStr] = String(out).split(/\s+/);
+  const pid = parseInt(pidStr, 10) || null;
+  if (!pid) return null;
+  return { pid, windowHandle: handleStr && handleStr !== '0' ? handleStr : null };
 }
