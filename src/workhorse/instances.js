@@ -266,8 +266,21 @@ export class InstanceManager {
     // Control-bridged sessions). Foregrounded instances are excluded above. Returns a
     // result to send back, or null on a hard probe failure → fall through to the fork.
     if (config.PROBE_REPORTS_ENABLED && probe.probeSupported && inst.pid && adapter.isProcessAlive(inst.pid)) {
-      const pr = await this._probeReportPath(instanceId, inst);
-      if (pr) return pr;
+      // A probe-disabled instance refused the live-probe (see _probeReportPath). Skip
+      // injecting and use the fork — but re-test once the rolling refusal window has
+      // expired, so a false positive (or a since-changed conversation) self-heals.
+      if (inst.probeDisabled) {
+        const since = inst.probeRefusedSince ? Date.parse(inst.probeRefusedSince) : 0;
+        if (since && (Date.now() - since) > config.PROBE_REFUSE_WINDOW_MS) {
+          console.log(`[instances] ${instanceId} (${inst.name}) probe-refusal window expired — re-enabling live-probe`);
+          mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { probeDisabled: false, probeRefusedCount: 0, probeRefusedSince: null }); });
+          inst.probeDisabled = false;
+        }
+      }
+      if (!inst.probeDisabled) {
+        const pr = await this._probeReportPath(instanceId, inst);
+        if (pr) return pr;
+      }
     }
 
     // Fork path (live transcript already resolved above).
@@ -350,6 +363,10 @@ export class InstanceManager {
             probeMarker: result.marker,
             reportFailureCount: 0,
             lastReportError: null,
+            // B3: a successful probe clears any in-window refusal tally, so intermittent
+            // refusals don't accumulate toward a disable across unrelated good probes.
+            probeRefusedCount: 0,
+            probeRefusedSince: null,
           });
         });
         console.log(`[instances] ${instanceId} (${inst.name}) probe report ok`);
@@ -357,6 +374,28 @@ export class InstanceManager {
       }
       mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { heldBySubcontroller: false }); });
 
+      if (result.refused) {
+        // The instance declined the probe. Tally it within a rolling window (anchored on
+        // the first refusal); after PROBE_REFUSE_LIMIT in-window refusals, disable the
+        // live-probe so we stop re-injecting (report() then uses the fork until the
+        // window expires and re-tests). Fall through to the fork report this cycle.
+        let count = 1, disabled = false;
+        mutateTracking(t => {
+          const i = t.instances[instanceId];
+          if (!i) return false;
+          const since = i.probeRefusedSince ? Date.parse(i.probeRefusedSince) : 0;
+          const fresh = !since || (Date.now() - since) > config.PROBE_REFUSE_WINDOW_MS;
+          count = fresh ? 1 : (i.probeRefusedCount || 0) + 1;
+          disabled = count >= config.PROBE_REFUSE_LIMIT;
+          updateInstance(t, instanceId, {
+            probeRefusedCount: count,
+            probeRefusedSince: fresh ? new Date().toISOString() : i.probeRefusedSince,
+            probeDisabled: disabled,
+          });
+        });
+        console.warn(`[instances] ${instanceId} (${inst.name}) refused the probe (${count}/${config.PROBE_REFUSE_LIMIT})${disabled ? ' — disabling live-probe; using fork reports' : ''}`);
+        return null; // report() falls through to the fork path
+      }
       if (result.unchanged) return { success: false, error: 'No changes since last probe — skip', skipped: true };
       if (result.skipped) return { success: false, error: `Probe skipped (${result.reason})`, skipped: true };
       // result.fallback (or any other non-skip failure): the live-window probe did

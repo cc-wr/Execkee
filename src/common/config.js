@@ -93,6 +93,14 @@ export default Object.freeze({
   // (input box, status bar, "Baked for Ns" footer) keeps it there; a real new turn
   // pushes it out. Chrome-agnostic — no need to enumerate TUI footer strings.
   PROBE_UNCHANGED_TAIL_CHARS: Number(process.env.EXECKEE_PROBE_TAIL_CHARS) || 1200,
+  // Some instances treat the injected probe as a prompt-injection attempt and decline
+  // it (reply in plain text, no markers — see example.txt). After this many CONFIRMED
+  // refusals the live-probe is disabled for that instance and reports fall back to the
+  // fork, so we stop re-injecting into a conversation that keeps refusing. The count is
+  // a rolling window anchored on the first refusal: it expires (and the probe is
+  // re-tested) after PROBE_REFUSE_WINDOW_MS, so a false positive self-heals ~weekly.
+  PROBE_REFUSE_LIMIT: Number(process.env.EXECKEE_PROBE_REFUSE_LIMIT) || 3,
+  PROBE_REFUSE_WINDOW_MS: Number(process.env.EXECKEE_PROBE_REFUSE_WINDOW_MS) || 7 * 24 * 60 * 60 * 1000,
 
   WINDOW_TITLE_PREFIX: 'Execkee',
 });

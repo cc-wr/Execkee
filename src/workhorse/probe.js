@@ -235,15 +235,31 @@ export async function probeReport(inst, { lastMarker } = {}) {
   const acceptBy = started + config.PROBE_ACCEPT_MS;
   const deadline = started + config.PROBE_TIMEOUT_MS;
   let accepted = false;
+  let idleAfterBusy = 0; // consecutive idle samples observed AFTER the turn started
   while (Date.now() < deadline) {
     await sleep(config.PROBE_POLL_MS);
     const f = readFrame(pid);
     if (f.startsWith('ATTACH_FAIL')) return { success: false, fallback: true, error: 'console detached during probe' };
-    if (!accepted && (isBusy(f) || frameHasReport(f, begin) || frameHasReport(f, end))) accepted = true;
+    const busyNow = isBusy(f);
+    if (!accepted && (busyNow || frameHasReport(f, begin) || frameHasReport(f, end))) accepted = true;
     if (frameHasReport(f, end)) {
       const report = extractReport(f, begin, end);
       if (report) return { success: true, report, marker: end };
       // standalone end marker present but not yet parseable — keep polling.
+    }
+    // Refusal detection (behavioral, not semantic): the prompt WAS accepted (the model
+    // began a turn) but it has returned to an idle/ready state WITHOUT printing the end
+    // marker — i.e. it answered in plain text and ignored the requested format. A
+    // compliant turn stays busy until the end marker is already on screen (caught
+    // above), so "started, finished, no marker" is the signature of an instance
+    // declining the probe (see example.txt). Require two consecutive idle samples so a
+    // transient mid-render gap can't trip it. The caller stops re-probing on this.
+    else if (accepted && !busyNow && looksReady(f)) {
+      if (++idleAfterBusy >= 2) {
+        return { success: false, refused: true, error: 'probe refused — model responded without the report markers' };
+      }
+    } else {
+      idleAfterBusy = 0;
     }
     if (!accepted && Date.now() > acceptBy) {
       return { success: false, fallback: true, error: 'probe not accepted — TUI did not respond to the injected prompt' };
