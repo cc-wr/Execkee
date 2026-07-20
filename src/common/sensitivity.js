@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import config from './config.js';
 import { claudeRun } from './exec-async.js';
 import { readJsonSafe, atomicWriteJson } from './safe-fs.js';
-import { isSensitiveHidden } from './store.js';
+import { isSensitiveHidden, readLifeTasks } from './store.js';
 
 // Sensitivity coding for everything the BROWSER DASHBOARD displays. An LLM pass tags
 // each display-bound string as sensitive or not; when the "hide sensitive" flag is on,
@@ -201,14 +201,40 @@ function dashboardTexts(data) {
 // no classifier call is made.
 // Populate the cache for everything a dashboard payload displays. Does NOT modify the
 // payload — the strip happens later, at the browser boundary only (see below). Run from
-// the cowork cycle and from `sensitive hide`, so the cache is warm before the page asks.
-// Skipped entirely when the flag is off, so the default costs nothing.
+// the cowork cycle and after every push (dashboard.js re-pushes when this classifies
+// something new). Skipped entirely when the flag is off, so the default costs nothing.
+//
+// Returns how many texts were NOT yet cached when it started (0 = nothing to do, no
+// model call was made). The caller uses that to decide whether a re-push is needed —
+// and a 0 return is what terminates the push→classify→push loop.
 export async function classifyDashboard(data) {
-  if (!data || !isSensitiveHidden()) return;
+  if (!data || !isSensitiveHidden()) return 0;
+  const texts = dashboardTexts(data);
+  const cache = readCache();
+  const fresh = texts.filter(t => norm(t) && !cache.entries[keyOf(t)]);
+  if (!fresh.length) return 0;
   try {
-    await classify(dashboardTexts(data));
+    await classify(texts);
   } catch (err) {
     console.error(`[sensitivity] classify threw (${err.message}) — failing closed`);
+  }
+  return fresh.length;
+}
+
+// Full pre-classification for `sensitive hide`: the current dashboard payload PLUS the
+// entire backlog — including future-dated tasks that aren't displayed yet — in ONE
+// batched call. Entering sensitive mode is allowed to take a moment; in exchange,
+// nothing is later withheld merely because it hadn't been seen when it surfaced.
+export async function classifyAllKnown(data) {
+  if (!isSensitiveHidden()) return;
+  const texts = [
+    ...dashboardTexts(data || {}),
+    ...(readLifeTasks().tasks || []).map(t => t && t.text),
+  ];
+  try {
+    await classify(texts);
+  } catch (err) {
+    console.error(`[sensitivity] full classify threw (${err.message}) — failing closed`);
   }
 }
 

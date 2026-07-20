@@ -9,7 +9,7 @@ import {
   isSensitiveHidden, setSensitiveHidden,
 } from '../common/store.js';
 import {
-  applySensitivityToDashboardSync, classifyDashboard, setOverride, listOverrides,
+  applySensitivityToDashboardSync, classifyDashboard, classifyAllKnown, setOverride, listOverrides,
 } from '../common/sensitivity.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -58,6 +58,26 @@ export class DashboardServer {
         this.sseClients.delete(client);
       }
     }
+    this._classifyNewAndRepush();
+  }
+
+  // Self-healing for the fail-closed strip: an item written outside the cowork cycle
+  // (task approve/reject/refresh, a scheduled task landing) has no verdict yet, so the
+  // strip above withholds it. Rather than leaving it invisible until the next cycle
+  // (up to 30 minutes), classify anything uncached in the background and re-push when
+  // done — the item appears after the seconds one model call takes. Runs after EVERY
+  // push, so no individual write path needs to remember it; classifyDashboard returns
+  // 0 without a model call when the flag is off or nothing is new, which both keeps
+  // the common case free and terminates the push→classify→re-push recursion.
+  _classifyNewAndRepush() {
+    if (this._classifying) return; // one classification in flight at a time
+    this._classifying = true;
+    classifyDashboard(readDashboardData())
+      .then((n) => {
+        this._classifying = false;
+        if (n > 0) this.pushUpdate();
+      })
+      .catch(() => { this._classifying = false; });
   }
 
   _handleRequest(req, res) {
@@ -150,9 +170,11 @@ export class DashboardServer {
       'Access-Control-Allow-Origin': '*',
     });
 
-    // Initial snapshot for a newly-connected browser — same strip as pushUpdate.
+    // Initial snapshot for a newly-connected browser — same strip as pushUpdate,
+    // same background classify-and-repush for anything not yet coded.
     const data = applySensitivityToDashboardSync(readDashboardData());
     res.write(`data: ${JSON.stringify(data)}\n\n`);
+    this._classifyNewAndRepush();
 
     this.sseClients.add(res);
     req.on('close', () => this.sseClients.delete(res));
@@ -280,17 +302,19 @@ export class DashboardServer {
     }
   }
 
-  // Sensitive-item visibility for the browser dashboard. `hide` warms the classifier
-  // cache BEFORE flipping the flag and pushing, so the page updates in one step rather
-  // than showing everything fail-closed-hidden until the next cycle classifies it.
+  // Sensitive-item visibility for the browser dashboard. `hide` classifies the whole
+  // known world — the dashboard payload AND the full backlog, future-dated tasks
+  // included — before responding. Entering sensitive mode may take a moment (accepted
+  // trade-off); in exchange the page updates in one step and nothing already on the
+  // task list is ever withheld merely because it hadn't been coded yet.
   async _handleApiSensitive(req, res) {
     const body = await this._readBody(req);
     try {
       const { action, text } = JSON.parse(body || '{}');
       if (action === 'hide' || action === 'show') {
         if (action === 'hide') {
-          setSensitiveHidden(true);              // classifyDashboard() no-ops while off
-          await classifyDashboard(readDashboardData());
+          setSensitiveHidden(true);              // classifyAllKnown() no-ops while off
+          await classifyAllKnown(readDashboardData());
         } else {
           setSensitiveHidden(false);
         }

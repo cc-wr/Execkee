@@ -29,7 +29,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 17;
+const BRIEF_VERSION = 18;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -397,6 +397,28 @@ Two different "stop" actions — choose by what the user means:
   (An instance you *created* fresh, with no captured session, can't be resumed once
   closed.) Confirm before closing, since it shuts a live window.
 
+## Sensitive mode (privacy screen for the browser dashboard)
+
+The dashboard can hide **potentially sensitive items** — health/medical scheduling,
+therapy topics, and anything naming a person — so the screen is safe for others to
+glance at. An LLM codes each item; coded-sensitive items are **removed entirely**
+from the browser dashboard while the mode is on. Your own CLI output (\`plan\`,
+\`dashboard\`, task edits) is **unaffected** — this blanks the screen, not your data.
+
+- "hide sensitive" / "privacy mode" / "someone's looking at my screen" →
+  \`sensitive hide\` (act directly; it may take a moment while items are coded — that
+  is expected, tell the user it's done when the command returns)
+- "show sensitive" / "back to normal" → \`sensitive show\`
+- "is sensitive mode on?" → \`sensitive status\`
+- Misclassifications: \`sensitive mark "<exact item text>"\` forces an item hidden;
+  \`sensitive unmark "<exact item text>"\` forces it visible. Both are permanent
+  overrides — use them when the user says "that one shouldn't be hidden" (or the
+  reverse). Get the exact text from \`plan\` or \`dashboard\`.
+
+New/uncoded items **fail closed**: they stay off the dashboard until coded (seconds,
+automatic). If the user asks where a just-added task went while sensitive mode is on,
+that's why — it appears once coded (or immediately if innocuous, via \`refresh-tasks\`).
+
 ## Commands (internal — never shown to the user)
 
 \`node "${CLI}" <command>\`:
@@ -420,6 +442,8 @@ Two different "stop" actions — choose by what the user means:
 - \`unmanage <id>\` — release / un-adopt (stop managing; leaves the window running)
 - \`resolve <issue-id> <message>\` — mark a dashboard issue resolved (space-delimited, no quotes)
 - \`issue add <text>\` — log a backlog item
+- \`sensitive hide\` / \`sensitive show\` / \`sensitive status\` — hide/show/query sensitive items on the browser dashboard (see "Sensitive mode" above)
+- \`sensitive mark "<text>"\` / \`sensitive unmark "<text>"\` — permanently force an item hidden / visible
 
 Natural language maps the obvious way: "pull up the X" → \`foreground\`; "hide it" →
 \`hide\`; "manage the conversation about Y" → \`sessions\` then \`manage\`.

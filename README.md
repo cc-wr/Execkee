@@ -391,6 +391,10 @@ node src/cli.js resolve <issue-id> "<msg>"     resolve a dashboard issue
 node src/cli.js dashboard                      raw dashboard data (JSON)
 node src/cli.js run-cycle                      force a cycle now (regenerate the dashboard)
 node src/cli.js refresh-tasks                  refresh the dashboard task list (no cycle)
+node src/cli.js sensitive hide|show|status     hide/show LLM-coded sensitive items (health,
+                                                 therapy, personal names) on the browser
+                                                 dashboard; CLI output is unaffected
+node src/cli.js sensitive mark|unmark "<text>" permanently force an item hidden / visible
 
 node src/cli.js plan                           today's plan (confirmed + tentative guesses, with ids)
 node src/cli.js approve-task <id> | --all      approve a tentative guessed task (promotes to backlog)
