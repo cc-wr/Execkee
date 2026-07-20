@@ -200,15 +200,21 @@ export function writeState(data) {
 
 // --- Sensitive-item visibility (browser dashboard only) ---
 // Default is SHOWN: hiding happens only when the controlling session runs
-// `execkee sensitive hide`. Stored on server state so cowork and the CLI agree.
+// `execkee sensitive hide`.
+//
+// Stored in its OWN single-purpose file, deliberately. The first version put the flag
+// on state.json — but the hub rebuilds that file wholesale on every workhorse state
+// persist (writeState({workhorses: liveState}), hub.js), which erased the flag within
+// seconds of `sensitive hide` setting it (the observed "hide didn't take" bug).
+// sensitivity.json is no better: classify() holds a read-modify-write across a
+// multi-second model call and would clobber a flag flipped mid-call. This file has
+// exactly one writer (the user's toggle) and one field, so neither hazard exists.
 
 export function isSensitiveHidden() {
-  return !!readState().hideSensitive;
+  return !!readJson(config.SENSITIVE_FLAG_FILE, { hidden: false }).hidden;
 }
 
 export function setSensitiveHidden(hidden) {
-  const state = readState();
-  state.hideSensitive = !!hidden;
-  writeState(state);
-  return state.hideSensitive;
+  writeJson(config.SENSITIVE_FLAG_FILE, { hidden: !!hidden, updatedAt: new Date().toISOString() });
+  return !!hidden;
 }
