@@ -13,6 +13,8 @@
 //   node src/cli.js hide <instance-id>         — hide instance
 //   node src/cli.js close <instance-id>        — close instance
 //   node src/cli.js dashboard                  — show dashboard data
+//   node src/cli.js sensitive hide|show        — hide/show sensitive items on the
+//                                                browser dashboard (CLI unaffected)
 //   node src/cli.js sessions                   — list available Claude sessions
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
@@ -292,6 +294,32 @@ switch (cmd) {
     if (!inst) { console.error('Instance not found'); process.exit(1); }
     const result = await api('/api/dispatch', 'POST', { workhorseId: inst.workhorseId, command: 'unmanage', instanceId });
     console.log(result.success !== false ? 'Released (un-adopted; the Claude window is left running).' : `Failed: ${result.error}`);
+    break;
+  }
+
+  // Sensitive-item visibility on the BROWSER dashboard. CLI output (including `plan`
+  // and `dashboard` below) is deliberately unaffected — the point is to blank the
+  // screen someone else can see, not to hide the data from you in your own session.
+  case 'sensitive': {
+    const action = args[0] || 'status';
+    if (!['hide', 'show', 'status', 'mark', 'unmark'].includes(action)) {
+      console.log('Usage: sensitive hide|show|status|mark <text>|unmark <text>');
+      break;
+    }
+    const text = args.slice(1).join(' ');
+    if ((action === 'mark' || action === 'unmark') && !text) {
+      console.log(`Usage: sensitive ${action} <exact item text>`);
+      break;
+    }
+    const r = await api('/api/sensitive', 'POST', { action, text });
+    if (r.success === false) { console.log(`Failed: ${r.error}`); break; }
+    if (action === 'mark' || action === 'unmark') {
+      console.log(`Item ${action === 'mark' ? 'forced sensitive' : 'forced visible'}: "${text}"`);
+    }
+    console.log(r.hidden
+      ? 'Sensitive items are HIDDEN from the browser dashboard (CLI output unaffected).'
+      : 'Sensitive items are VISIBLE on the browser dashboard.');
+    console.log(`Manual overrides: ${r.overrides}`);
     break;
   }
 

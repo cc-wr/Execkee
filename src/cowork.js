@@ -14,6 +14,7 @@ import {
 } from './common/store.js';
 import { DESIRED_STATE, VISIBILITY, CMD } from './common/protocol.js';
 import { readContextSources } from './common/context-sources.js';
+import { classifyDashboard } from './common/sensitivity.js';
 import config from './common/config.js';
 
 export async function runCoworkCycle(hub) {
@@ -123,6 +124,11 @@ export async function runCoworkCycle(hub) {
     flaggedEvents: collectFlaggedEvents(tracking),
     cycleTime,
   };
+  // Warm the sensitivity cache for everything this payload displays (no-op unless the
+  // controlling session has run `execkee sensitive hide`). The payload is stored in
+  // FULL — stripping happens only on the way to the browser, so the CLI and the stored
+  // JSON keep every item.
+  await classifyDashboard(dashboardData);
   writeDashboardData(dashboardData);
 
   // Step 7: Clear reconciled resolutions

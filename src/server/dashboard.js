@@ -6,7 +6,11 @@ import {
   readDashboardData, writeDashboardData,
   readSentenceQueue, writeSentenceQueue,
   logResolution,
+  isSensitiveHidden, setSensitiveHidden,
 } from '../common/store.js';
+import {
+  applySensitivityToDashboardSync, classifyDashboard, setOverride, listOverrides,
+} from '../common/sensitivity.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_HTML_PATH = join(__dirname, '..', '..', 'dashboard', 'index.html');
@@ -42,7 +46,10 @@ export class DashboardServer {
   }
 
   pushUpdate() {
-    const data = readDashboardData();
+    // Browser boundary: strip sensitive items on the way out (no-op unless the
+    // controlling session ran `execkee sensitive hide`). Applied here and in the SSE
+    // snapshot only — the stored JSON and the CLI endpoints keep the full data.
+    const data = applySensitivityToDashboardSync(readDashboardData());
     const payload = `data: ${JSON.stringify(data)}\n\n`;
     for (const client of this.sseClients) {
       try {
@@ -88,6 +95,9 @@ export class DashboardServer {
       return this._handleApiRefreshTasks(req, res);
     }
 
+    if (url.pathname === '/api/sensitive' && req.method === 'POST') {
+      return this._handleApiSensitive(req, res);
+    }
     if (url.pathname === '/api/approve-task' && req.method === 'POST') {
       return this._handleApiApproveTask(req, res);
     }
@@ -140,7 +150,8 @@ export class DashboardServer {
       'Access-Control-Allow-Origin': '*',
     });
 
-    const data = readDashboardData();
+    // Initial snapshot for a newly-connected browser — same strip as pushUpdate.
+    const data = applySensitivityToDashboardSync(readDashboardData());
     res.write(`data: ${JSON.stringify(data)}\n\n`);
 
     this.sseClients.add(res);
@@ -265,6 +276,36 @@ export class DashboardServer {
       res.end(JSON.stringify({ success: true }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  // Sensitive-item visibility for the browser dashboard. `hide` warms the classifier
+  // cache BEFORE flipping the flag and pushing, so the page updates in one step rather
+  // than showing everything fail-closed-hidden until the next cycle classifies it.
+  async _handleApiSensitive(req, res) {
+    const body = await this._readBody(req);
+    try {
+      const { action, text } = JSON.parse(body || '{}');
+      if (action === 'hide' || action === 'show') {
+        if (action === 'hide') {
+          setSensitiveHidden(true);              // classifyDashboard() no-ops while off
+          await classifyDashboard(readDashboardData());
+        } else {
+          setSensitiveHidden(false);
+        }
+      } else if (action === 'mark' || action === 'unmark') {
+        if (!text) throw new Error('mark/unmark needs the item text');
+        if (action === 'mark') setOverride(text, true);
+        else setOverride(text, false);
+      } else if (action !== 'status') {
+        throw new Error(`unknown action '${action}'`);
+      }
+      this.pushUpdate();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, hidden: isSensitiveHidden(), overrides: listOverrides().length }));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: err.message }));
     }
   }

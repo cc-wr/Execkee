@@ -38,6 +38,7 @@ export default Object.freeze({
   SCHEDULED_GUESSES_FILE: join(SHARED_STORE_DIR, 'scheduled-guesses.json'),
   RESOLUTIONS_FILE: join(SHARED_STORE_DIR, 'resolutions.json'),
   DASHBOARD_DATA_FILE: join(SHARED_STORE_DIR, 'dashboard-data.json'),
+  SENSITIVITY_FILE: join(SHARED_STORE_DIR, 'sensitivity.json'), // LLM sensitivity codings + manual overrides
   LIFE_TASKS_FILE: join(LIFE_TASKS_DIR, 'tasks.json'),
   TRACKING_LOG_FILE: join(LIFE_TASKS_DIR, 'TRACKING.md'),  // primary's markdown log (context-sources.js) — NOT the JSON store
   // Manifest of extra files the cycle synthesis reads as context (a life-tasks
@@ -99,6 +100,9 @@ export default Object.freeze({
   // fork, so we stop re-injecting into a conversation that keeps refusing. The count is
   // a rolling window anchored on the first refusal: it expires (and the probe is
   // re-tested) after PROBE_REFUSE_WINDOW_MS, so a false positive self-heals ~weekly.
+  // Sensitivity classification (sensitivity.js): how long the batched classifier call
+  // may take before we give up and fail closed (treat the batch as sensitive).
+  SENSITIVITY_TIMEOUT_MS: Number(process.env.EXECKEE_SENSITIVITY_TIMEOUT_MS) || 120_000,
   PROBE_REFUSE_LIMIT: Number(process.env.EXECKEE_PROBE_REFUSE_LIMIT) || 3,
   PROBE_REFUSE_WINDOW_MS: Number(process.env.EXECKEE_PROBE_REFUSE_WINDOW_MS) || 7 * 24 * 60 * 60 * 1000,
 

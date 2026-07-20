@@ -197,3 +197,18 @@ export function writeState(data) {
   data.updatedAt = new Date().toISOString();
   writeJson(config.STATE_FILE, data);
 }
+
+// --- Sensitive-item visibility (browser dashboard only) ---
+// Default is SHOWN: hiding happens only when the controlling session runs
+// `execkee sensitive hide`. Stored on server state so cowork and the CLI agree.
+
+export function isSensitiveHidden() {
+  return !!readState().hideSensitive;
+}
+
+export function setSensitiveHidden(hidden) {
+  const state = readState();
+  state.hideSensitive = !!hidden;
+  writeState(state);
+  return state.hideSensitive;
+}
