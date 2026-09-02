@@ -13,6 +13,7 @@
 //   node src/supervisor.js workhorse ws://<host>:7700 <workhorseId> <name>
 
 import { spawn, execFileSync } from 'child_process';
+import { portInUse } from './common/net.js';
 import { hostname } from 'os';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -117,20 +118,41 @@ function defaultGatewayConfig() {
   ].join('\n');
 }
 
-// The gateway is usable when enabled and installed. Checked at launch time for the
-// primary; if the binary is missing everything simply runs direct (no gateway).
-function gatewayAvailable() {
-  return config.GATEWAY_ENABLED && existsSync(GATEWAY_EXE);
+// Whether the gateway is actually REACHABLE — refreshed by a periodic probe. Not
+// "is the binary installed": a primary pointed at a gateway that is down has every
+// request fail, so routing decisions must key off a live socket, never off the file.
+let gatewayUp = false;
+
+async function refreshGatewayUp() {
+  gatewayUp = config.GATEWAY_ENABLED && await portInUse(config.GATEWAY_PORT);
+  return gatewayUp;
 }
 
-function startGateway() {
-  if (!config.GATEWAY_ENABLED) { log('gateway', 'disabled (EXECKEE_GATEWAY=0)'); return false; }
+// Wait (briefly) for the gateway to accept connections — used once before the first
+// primary launch so a cold start still gets a routed primary instead of a direct one.
+async function waitForGateway(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await refreshGatewayUp()) return true;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return false;
+}
+
+// Supervise the machine's ONE gateway. Unlike superviseProc this checks the port
+// before every (re)start: the controller and a co-resident workhorse both call this,
+// and only one of them may own the process — the other shares it. That also settles
+// the startup race (both probe an empty port, both spawn, one loses the bind): the
+// loser's exit lands back in tick(), now sees the winner listening, and waits instead
+// of crash-looping. If the owner later dies, whoever is polling takes over.
+function superviseGateway() {
+  if (!config.GATEWAY_ENABLED) { log('gateway', 'disabled (EXECKEE_GATEWAY=0)'); return; }
   if (!existsSync(config.GATEWAY_DIR)) mkdirSync(config.GATEWAY_DIR, { recursive: true });
   if (!existsSync(GATEWAY_EXE)) {
     log('gateway', `not installed — put the agentgateway binary at ${GATEWAY_EXE} ` +
       '(github.com/agentgateway/agentgateway releases; verify the .sha256). ' +
       'Until then the primary and flipped instances run direct to Anthropic.');
-    return false;
+    return;
   }
   if (!existsSync(GATEWAY_CFG)) {
     writeFileSync(GATEWAY_CFG, defaultGatewayConfig(), 'utf-8');
@@ -139,13 +161,54 @@ function startGateway() {
   if (!process.env.DEEPSEEK_API_KEY) {
     log('gateway', 'DEEPSEEK_API_KEY is not set — deepseek models will fail through the gateway (claude models unaffected)');
   }
-  // agentgateway v1.5.0 has no bind-address config: the data port listens on ALL
-  // interfaces. Loopback traffic never traverses the Windows Firewall, so an inbound
-  // block rule on the port keeps localhost working while shutting out the LAN — the
-  // supervisor cannot add it (needs elevation); it only reminds until one exists.
-  log('gateway', `starting on ${config.GATEWAY_URL} — ensure an inbound firewall block for TCP ${config.GATEWAY_PORT} (see README, "Gateway")`);
-  superviseProc('gateway', GATEWAY_EXE, ['-f', GATEWAY_CFG]);
-  return true;
+
+  const rec = { name: 'gateway', proc: null };
+  nodeChildren.push(rec);
+  let backoff = 1000;
+  let startedAt = 0;
+  let announcedShared = false;
+
+  async function tick() {
+    if (shuttingDown) return;
+    if (await portInUse(config.GATEWAY_PORT)) {
+      // Someone already serves this port on this machine — share it, don't spawn a
+      // second one. (Our own child also lands here; harmless, it just re-polls.)
+      if (!announcedShared && !rec.proc) {
+        log('gateway', `already running on ${config.GATEWAY_URL} (another Execkee process on this machine owns it) — sharing it`);
+        announcedShared = true;
+      }
+      gatewayUp = true;
+      setTimeout(tick, 15_000);
+      return;
+    }
+    announcedShared = false;
+    start();
+  }
+
+  function start() {
+    if (shuttingDown) return;
+    startedAt = Date.now();
+    // agentgateway v1.5.0 has no bind-address config: its ports listen on ALL
+    // interfaces. Loopback never traverses the Windows Firewall, so an inbound block
+    // rule keeps localhost working while shutting out the LAN — the supervisor cannot
+    // add it (needs elevation); it only reminds until one exists.
+    log('gateway', `starting on ${config.GATEWAY_URL} — ensure an inbound firewall block for TCP ${config.GATEWAY_PORT} (see README, "Gateway")`);
+    const proc = spawn(GATEWAY_EXE, ['-f', GATEWAY_CFG], { cwd: ROOT, stdio: 'inherit' });
+    rec.proc = proc;
+    proc.on('exit', (code) => {
+      rec.proc = null;
+      gatewayUp = false;
+      if (shuttingDown) return;
+      if (Date.now() - startedAt > 300_000) backoff = 1000; // stable ≥5 min → reset
+      log('gateway', `exited (code ${code}); re-checking in ${backoff}ms`);
+      setTimeout(tick, backoff);
+      backoff = Math.min(backoff * 2, 30_000);
+    });
+    proc.on('error', (err) => log('gateway', `spawn error: ${err.message}`));
+  }
+
+  tick();
+  setInterval(refreshGatewayUp, 30_000).unref?.();
 }
 
 // --- The primary Claude Code surface (a visible window in life-tasks) ---
@@ -290,10 +353,11 @@ function launchPrimaryWindow() {
   // RC session name. The primary relaunches via resume, so RC activates right after.
   const rc = config.REMOTE_CONTROL_ENABLED ? ' --remote-control' : '';
 
-  // The primary ALWAYS routes through the local gateway when it's installed: it gets
-  // all four Anthropic aliases on the user's subscription OAuth plus the deepseek
-  // models, with no billing change. Degrades silently to direct when not installed.
-  const viaGateway = gatewayAvailable();
+  // The primary ALWAYS routes through the local gateway when one is actually LISTENING
+  // (installed is not enough — a primary pointed at a dead gateway fails every
+  // request). Through it the primary gets the Anthropic aliases on the user's
+  // subscription OAuth plus the deepseek models, with no billing change.
+  const viaGateway = config.GATEWAY_ENABLED && gatewayUp;
   const env = viaGateway ? { ANTHROPIC_BASE_URL: config.GATEWAY_URL } : null;
   const gwTag = viaGateway ? ' [gateway]' : '';
 
@@ -314,9 +378,15 @@ function launchPrimaryWindow() {
 }
 
 let primaryRelaunches = [];
-function startPrimary() {
+async function startPrimary() {
   ensureLifeTasksScaffold();
   ensurePrimaryFolderTrusted();
+  // Give the gateway a moment to come up (it may still be binding, or another
+  // Execkee process on this machine may own it) so a cold start yields a ROUTED
+  // primary. If it never appears, launch direct rather than into a dead proxy.
+  if (config.GATEWAY_ENABLED && existsSync(GATEWAY_EXE) && !(await waitForGateway(20_000))) {
+    log('primary', 'gateway not reachable — launching the primary direct to Anthropic (no deepseek models this session)');
+  }
   primaryPid = launchPrimaryWindow();
   log('primary', `launched pid=${primaryPid} in ${config.LIFE_TASKS_DIR}`);
   primaryInterval = setInterval(() => {
@@ -727,7 +797,7 @@ function startController() {
     log('controller', 'brain-only: no co-located workhorse (set EXECKEE_LOCAL_WORKHORSE=1 to enable one)');
     purgeLocalWorkhorse();
   }
-  startGateway();
+  superviseGateway();
   superviseNode('server', ['src/server/index.js']);
   if (localWh) {
     setTimeout(() => {
@@ -748,7 +818,7 @@ function startController() {
 function startWorkhorse() {
   // The gateway runs on workhorse machines too: a FLIPPED instance's claude window
   // connects to 127.0.0.1, so routing must be local to the machine that owns it.
-  startGateway();
+  superviseGateway();
   log('workhorse', `connecting to ${serverUrl} as ${workhorseId}`);
   superviseNode('workhorse', ['src/workhorse/index.js', serverUrl, workhorseId, workhorseName]);
 }

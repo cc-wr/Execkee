@@ -4,6 +4,7 @@ import { existsSync, statSync } from 'fs';
 import { hasSessionChanged, runForkReport, getSessionPosition, getSessionJsonlPath, getSessionCwd, resolveSessionId, listLocalSessions, newestSessionInSlugOf } from './reporter.js';
 import * as adapter from './adapter.js';
 import * as probe from './probe.js';
+import { portInUse } from '../common/net.js';
 import config from '../common/config.js';
 
 // Every mutation of the local tracking store goes through mutateTracking (a
@@ -439,6 +440,11 @@ export class InstanceManager {
     if (inst.externallyHeld) return { success: false, error: 'Instance is externally held (open in the user\'s own GUI) — cannot quit/relaunch it' };
     const target = !inst.gatewayMode;
     if (target && !config.GATEWAY_ENABLED) return { success: false, error: 'Gateway is disabled on this workhorse (EXECKEE_GATEWAY=0)' };
+    // Never flip ONTO a gateway that isn't listening — the relaunched window would
+    // send every request to a dead proxy. (Flipping OFF is always safe.)
+    if (target && !(await portInUse(config.GATEWAY_PORT))) {
+      return { success: false, error: `Gateway is not running on this machine (${config.GATEWAY_URL}) — start the workhorse supervisor or install the binary; instance left unchanged` };
+    }
 
     // KI-6: advance to the LIVE session id before relaunching, or --resume reverts
     // the conversation to a stale transcript (same rule as report()).
