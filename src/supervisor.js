@@ -118,6 +118,18 @@ function defaultGatewayConfig() {
   ].join('\n');
 }
 
+// Environment that puts the gateway's non-Anthropic model into a session's /model
+// picker. ANTHROPIC_CUSTOM_MODEL_OPTION *adds* a row; it does not shadow or replace
+// any built-in alias, so opus/haiku/fable behave exactly as they do without it.
+function gatewayModelEnv() {
+  if (!config.GATEWAY_CUSTOM_MODEL) return {};
+  return {
+    ANTHROPIC_CUSTOM_MODEL_OPTION: config.GATEWAY_CUSTOM_MODEL,
+    ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: config.GATEWAY_CUSTOM_MODEL_NAME,
+    ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION: 'Served by the local Execkee gateway',
+  };
+}
+
 // Whether the gateway is actually REACHABLE — refreshed by a periodic probe. Not
 // "is the binary installed": a primary pointed at a gateway that is down has every
 // request fail, so routing decisions must key off a live socket, never off the file.
@@ -358,7 +370,7 @@ function launchPrimaryWindow() {
   // request). Through it the primary gets the Anthropic aliases on the user's
   // subscription OAuth plus the deepseek models, with no billing change.
   const viaGateway = config.GATEWAY_ENABLED && gatewayUp;
-  const env = viaGateway ? { ANTHROPIC_BASE_URL: config.GATEWAY_URL } : null;
+  const env = viaGateway ? { ANTHROPIC_BASE_URL: config.GATEWAY_URL, ...gatewayModelEnv() } : null;
   const gwTag = viaGateway ? ' [gateway]' : '';
 
   // Resume the prior primary conversation across restarts when we have a valid one.

@@ -113,6 +113,15 @@ export default Object.freeze({
   // DeepSeek models (keyed via DEEPSEEK_API_KEY). Machine-verified 2026-09-02 (F1).
   // The supervisor runs one gateway per machine; the PRIMARY always routes through it,
   // workhorse instances do NOT by default — `flip <id>` toggles one (quit + relaunch).
+  // A non-Anthropic model the gateway also serves. Gateway-routed sessions get it as a
+  // /model picker entry via ANTHROPIC_CUSTOM_MODEL_OPTION, which ADDS an entry without
+  // replacing the built-in aliases — fable/opus/haiku keep working exactly as before.
+  // (Claude Code's own gateway discovery can't be used here: it is skipped entirely
+  // unless ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is set, and setting either would
+  // replace the subscription OAuth credential this whole design exists to preserve.
+  // Verified 2026-09-02: with OAuth, Claude Code never requests GET /v1/models.)
+  GATEWAY_CUSTOM_MODEL: process.env.EXECKEE_GATEWAY_CUSTOM_MODEL || 'deepseek-v4-flash',
+  GATEWAY_CUSTOM_MODEL_NAME: process.env.EXECKEE_GATEWAY_CUSTOM_MODEL_NAME || 'DeepSeek v4 Flash',
   GATEWAY_ENABLED: process.env.EXECKEE_GATEWAY !== '0',
   GATEWAY_PORT: Number(process.env.EXECKEE_GATEWAY_PORT) || 4000,
   GATEWAY_URL: `http://127.0.0.1:${Number(process.env.EXECKEE_GATEWAY_PORT) || 4000}`,

@@ -60,7 +60,9 @@ param(
     [string]$InstanceId = "",
     [string]$DataDir = "",
     [string]$SessionId = "",
-    [string]$GatewayUrl = ""
+    [string]$GatewayUrl = "",
+    [string]$CustomModel = "",
+    [string]$CustomModelName = ""
 )
 
 Add-Type @"
@@ -94,6 +96,13 @@ switch ($Action) {
             # Gateway-routed instance: claude sends its API traffic (with its own
             # OAuth credentials) to the local agentgateway instead of api.anthropic.com.
             $env:ANTHROPIC_BASE_URL = $GatewayUrl
+            if ($CustomModel -and $CustomModel.Length -gt 0) {
+                # Adds the gateway's non-Anthropic model as a /model picker row. This
+                # ADDS an entry; built-in aliases (opus/haiku/fable) are untouched.
+                $env:ANTHROPIC_CUSTOM_MODEL_OPTION = $CustomModel
+                $env:ANTHROPIC_CUSTOM_MODEL_OPTION_NAME = $CustomModelName
+                $env:ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION = 'Served by the local Execkee gateway'
+            }
         }
         $sp = @{ FilePath = 'claude'; PassThru = $true; WorkingDirectory = $Cwd }
         $argList = @()
@@ -225,7 +234,13 @@ function doLaunch(instanceId, claudeArgs, projectPath, gateway) {
   const rc = config.REMOTE_CONTROL_ENABLED ? ['--remote-control'] : [];
   const argString = [...claudeArgs, ...rc, '--settings', settings].join(' ');
   const params = { Action: 'launch', Cwd: cwd, ArgString: argString, InstanceId: instanceId, DataDir: config.DATA_DIR };
-  if (gateway && config.GATEWAY_ENABLED) params.GatewayUrl = config.GATEWAY_URL;
+  if (gateway && config.GATEWAY_ENABLED) {
+    params.GatewayUrl = config.GATEWAY_URL;
+    if (config.GATEWAY_CUSTOM_MODEL) {
+      params.CustomModel = config.GATEWAY_CUSTOM_MODEL;
+      params.CustomModelName = config.GATEWAY_CUSTOM_MODEL_NAME;
+    }
+  }
   const out = runHelper(params);
   const [pidStr, handleStr] = out.split(/\s+/);
   const pid = parseInt(pidStr, 10) || null;
