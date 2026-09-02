@@ -58,6 +58,7 @@ export function createInstanceRecord({ id, workhorseId, name, projectPath, sessi
     probeRefusedCount: 0,
     probeRefusedSince: null,
     probeDisabled: false,
+    gatewayMode: false, // route this instance's claude through the local LLM gateway (flip)
     lastActivityTime: now,
     createdAt: now,
     crashCount: 0,

@@ -385,6 +385,9 @@ node src/cli.js foreground <instance-id>       pull an instance to the front
 node src/cli.js hide <instance-id>             background an instance
 node src/cli.js close <instance-id>            close an instance (session stays re-adoptable)
 node src/cli.js unmanage <instance-id>         release / un-adopt (leaves the window running)
+node src/cli.js flip <instance-id>             quit + relaunch, toggling LLM-gateway routing
+                                                 (adds deepseek models; claude models stay on
+                                                 the subscription; warns: unflushed turns drop)
 
 node src/cli.js sentence                       current dashboard sentence
 node src/cli.js resolve <issue-id> "<msg>"     resolve a dashboard issue
@@ -422,6 +425,35 @@ files once a day, tagging which are achievable today. Guesses are **tentative
 `reject-task`) — nothing LLM-guessed enters your confirmed backlog without your
 approval. `schedule-guess` queues a guess to surface on a future date; `defer` holds a
 topic so its surfaced tasks stop appearing until you lift it.
+
+## Gateway (multi-model routing)
+
+Each machine's supervisor runs a local **agentgateway** (`~/.execkee/agentgateway/`)
+when the binary is present. It routes by model name: `deepseek-v4-flash` /
+`deepseek-v4-pro` go to DeepSeek (needs `DEEPSEEK_API_KEY` in the environment);
+every other model goes to Anthropic with **no stored key** — the caller's own OAuth
+credentials pass through, so Claude-subscription billing is unchanged. The primary
+always routes through it; workhorse instances run direct unless `flip`ped.
+
+Install: download `agentgateway-windows-amd64.exe` from the
+[agentgateway releases](https://github.com/agentgateway/agentgateway/releases),
+verify the `.sha256`, and save it as `~/.execkee/agentgateway/agentgateway.exe`.
+The supervisor writes a default `config.yaml` beside it on first start (edit freely;
+never overwritten). Knobs: `EXECKEE_GATEWAY=0` disables; `EXECKEE_GATEWAY_PORT`
+(default 4000).
+
+**Firewall (required):** agentgateway v1.5.0 binds all interfaces and has no
+bind-address setting. Loopback traffic bypasses Windows Firewall, so one inbound
+block rule keeps localhost working while shutting out the LAN/Tailscale (run
+elevated):
+
+```
+netsh advfirewall firewall add rule name="Execkee gateway local-only" dir=in action=block protocol=TCP localport=4000,15020,15021
+```
+
+Known trade-off: some Claude Code experimental betas may not pass through the
+gateway yet; a routed window that hits one can set
+`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` (see agentgateway's Claude Code docs).
 
 ## Logs
 

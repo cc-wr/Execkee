@@ -59,7 +59,8 @@ param(
     [string]$ArgString = "",
     [string]$InstanceId = "",
     [string]$DataDir = "",
-    [string]$SessionId = ""
+    [string]$SessionId = "",
+    [string]$GatewayUrl = ""
 )
 
 Add-Type @"
@@ -88,6 +89,11 @@ switch ($Action) {
         if ($DataDir -and $DataDir.Length -gt 0) {
             # So the in-instance hook resolves the workhorse's OWN local mirror.
             $env:EXECKEE_DATA_DIR = $DataDir
+        }
+        if ($GatewayUrl -and $GatewayUrl.Length -gt 0) {
+            # Gateway-routed instance: claude sends its API traffic (with its own
+            # OAuth credentials) to the local agentgateway instead of api.anthropic.com.
+            $env:ANTHROPIC_BASE_URL = $GatewayUrl
         }
         $sp = @{ FilePath = 'claude'; PassThru = $true; WorkingDirectory = $Cwd }
         $argList = @()
@@ -210,7 +216,7 @@ function runHelper(params) {
   }
 }
 
-function doLaunch(instanceId, claudeArgs, projectPath) {
+function doLaunch(instanceId, claudeArgs, projectPath, gateway) {
   const cwd = projectPath || process.cwd();
   const settings = ensureInstanceSettings();
   // Optional native Remote Control (EXECKEE_REMOTE_CONTROL=1). Safe to add here:
@@ -218,7 +224,9 @@ function doLaunch(instanceId, claudeArgs, projectPath) {
   // swallows one as a session name. Degrades gracefully if RC is ineligible.
   const rc = config.REMOTE_CONTROL_ENABLED ? ['--remote-control'] : [];
   const argString = [...claudeArgs, ...rc, '--settings', settings].join(' ');
-  const out = runHelper({ Action: 'launch', Cwd: cwd, ArgString: argString, InstanceId: instanceId, DataDir: config.DATA_DIR });
+  const params = { Action: 'launch', Cwd: cwd, ArgString: argString, InstanceId: instanceId, DataDir: config.DATA_DIR };
+  if (gateway && config.GATEWAY_ENABLED) params.GatewayUrl = config.GATEWAY_URL;
+  const out = runHelper(params);
   const [pidStr, handleStr] = out.split(/\s+/);
   const pid = parseInt(pidStr, 10) || null;
   const windowHandle = handleStr && handleStr !== '0' ? handleStr : null;
@@ -229,18 +237,18 @@ export function launchInstance(instanceId, sessionId, projectPath, options = {})
   // A session-less instance (e.g. one created with no captured session) cannot be
   // --resume'd; launch it as a fresh window rather than passing '--resume undefined',
   // which builds a malformed ArgumentList and crash-loops (see KI-1).
-  if (!sessionId) return createNewInstance(instanceId, projectPath);
+  if (!sessionId) return createNewInstance(instanceId, projectPath, options);
   const claudeArgs = ['--resume', sessionId];
   // Adopt-with-full-permissions: run unattended, no approval prompts (silent on
   // Windows). Compatible with --resume — the primary launches the same way.
   if (options.skipPermissions) claudeArgs.push('--dangerously-skip-permissions');
-  const result = doLaunch(instanceId, claudeArgs, projectPath);
-  console.log(`[adapter-win] Launched ${instanceId}: pid=${result.pid} hwnd=${result.windowHandle}${options.skipPermissions ? ' [full permissions]' : ''}`);
+  const result = doLaunch(instanceId, claudeArgs, projectPath, options.gateway);
+  console.log(`[adapter-win] Launched ${instanceId}: pid=${result.pid} hwnd=${result.windowHandle}${options.skipPermissions ? ' [full permissions]' : ''}${options.gateway ? ' [gateway]' : ''}`);
   return result;
 }
 
-export function createNewInstance(instanceId, projectPath) {
-  const result = doLaunch(instanceId, [], projectPath);
+export function createNewInstance(instanceId, projectPath, options = {}) {
+  const result = doLaunch(instanceId, [], projectPath, options.gateway);
   console.log(`[adapter-win] Created ${instanceId}: pid=${result.pid} hwnd=${result.windowHandle}`);
   return result;
 }

@@ -107,5 +107,16 @@ export default Object.freeze({
   PROBE_REFUSE_LIMIT: Number(process.env.EXECKEE_PROBE_REFUSE_LIMIT) || 3,
   PROBE_REFUSE_WINDOW_MS: Number(process.env.EXECKEE_PROBE_REFUSE_WINDOW_MS) || 7 * 24 * 60 * 60 * 1000,
 
+  // Local LLM gateway (agentgateway). Routes model names to providers so one Claude
+  // Code session can use both Anthropic models (via the user's OWN subscription OAuth —
+  // the gateway holds no Anthropic key; empty provider params = auth passthrough) and
+  // DeepSeek models (keyed via DEEPSEEK_API_KEY). Machine-verified 2026-09-02 (F1).
+  // The supervisor runs one gateway per machine; the PRIMARY always routes through it,
+  // workhorse instances do NOT by default — `flip <id>` toggles one (quit + relaunch).
+  GATEWAY_ENABLED: process.env.EXECKEE_GATEWAY !== '0',
+  GATEWAY_PORT: Number(process.env.EXECKEE_GATEWAY_PORT) || 4000,
+  GATEWAY_URL: `http://127.0.0.1:${Number(process.env.EXECKEE_GATEWAY_PORT) || 4000}`,
+  GATEWAY_DIR: join(DATA_DIR, 'agentgateway'),
+
   WINDOW_TITLE_PREFIX: 'Execkee',
 });

@@ -22,6 +22,7 @@ export const CMD = Object.freeze({
   CREATE: 'create',
   MANAGE: 'manage',
   UNMANAGE: 'unmanage',
+  FLIP: 'flip', // quit + relaunch an instance, toggling gateway routing
   LIST_SESSIONS: 'list-sessions', // enumerate the workhorse's adoptable Claude sessions
 });
 

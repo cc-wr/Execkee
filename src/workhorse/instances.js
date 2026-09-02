@@ -427,6 +427,59 @@ export class InstanceManager {
     return { success: true };
   }
 
+  // Toggle an instance between direct-to-Anthropic and gateway-routed. There is no
+  // in-place way to change a live window's base URL, so this is a quit-and-relaunch
+  // via --resume (same mechanism, and same caveat, as a permission-mode change:
+  // recent turns the window held in memory but hadn't flushed can be lost — the
+  // primary warns the user before invoking this, per the operator brief). The mode
+  // persists on the record, so crash-recovery relaunches keep it.
+  async flip(instanceId) {
+    const inst = readTracking().instances[instanceId];
+    if (!inst) return { success: false, error: 'Instance not found' };
+    if (inst.externallyHeld) return { success: false, error: 'Instance is externally held (open in the user\'s own GUI) — cannot quit/relaunch it' };
+    const target = !inst.gatewayMode;
+    if (target && !config.GATEWAY_ENABLED) return { success: false, error: 'Gateway is disabled on this workhorse (EXECKEE_GATEWAY=0)' };
+
+    // KI-6: advance to the LIVE session id before relaunching, or --resume reverts
+    // the conversation to a stale transcript (same rule as report()).
+    let liveSid = inst.sessionId;
+    const claimed = new Set(
+      Object.values(readTracking().instances).filter(i => i.id !== instanceId && i.sessionId).map(i => i.sessionId)
+    );
+    const newest = newestSessionInSlugOf(inst.sessionId, claimed);
+    if (newest && newest !== inst.sessionId) {
+      console.log(`[instances] ${instanceId}: flip tracking live session ${inst.sessionId.slice(0, 8)} -> ${newest.slice(0, 8)}`);
+      liveSid = newest;
+    }
+
+    this._stopMonitor(instanceId);
+    if (adapter.isProcessAlive(inst.pid)) {
+      adapter.killInstance(inst.pid);
+      // Wait for the old process to actually exit before resuming its session —
+      // relaunching while it still holds the window/session races the transcript.
+      for (let i = 0; i < 20 && adapter.isProcessAlive(inst.pid); i++) {
+        await new Promise(r => setTimeout(r, 250));
+      }
+      if (adapter.isProcessAlive(inst.pid)) {
+        this._startMonitor(instanceId); // leave it as it was
+        return { success: false, error: 'Old window did not exit — flip aborted, instance unchanged' };
+      }
+    }
+
+    mutateTracking(t => {
+      if (!t.instances[instanceId]) return false;
+      updateInstance(t, instanceId, { gatewayMode: target, sessionId: liveSid, watermark: liveSid !== inst.sessionId ? null : inst.watermark, pid: null, windowHandle: null });
+    });
+    this._launchAndMonitor(readTracking().instances[instanceId]);
+
+    const after = readTracking().instances[instanceId];
+    if (!after || !after.pid) {
+      return { success: false, error: 'Relaunch produced no pid — check the workhorse log', gateway: target };
+    }
+    console.log(`[instances] ${instanceId} (${inst.name}) flipped ${target ? 'onto' : 'off'} the gateway (pid=${after.pid})`);
+    return { success: true, gateway: target };
+  }
+
   getLocalState() {
     const tracking = readTracking();
     const instances = getInstancesForWorkhorse(tracking, this.workhorseId);
@@ -452,6 +505,7 @@ export class InstanceManager {
       reportFailureCount: inst.reportFailureCount,
       lastReportError: inst.lastReportError,
       skipPermissions: inst.skipPermissions,
+      gatewayMode: !!inst.gatewayMode,
       processAlive: adapter.isProcessAlive(inst.pid),
       lastActivityTime: inst.lastActivityTime,
     }));
@@ -459,7 +513,7 @@ export class InstanceManager {
 
   _launchAndMonitor(inst) {
     console.log(`[instances] Launching instance ${inst.id} (session: ${inst.sessionId})`);
-    const launched = adapter.launchInstance(inst.id, inst.sessionId, inst.projectPath, { skipPermissions: inst.skipPermissions }); // adapter call outside the lock
+    const launched = adapter.launchInstance(inst.id, inst.sessionId, inst.projectPath, { skipPermissions: inst.skipPermissions, gateway: inst.gatewayMode }); // adapter call outside the lock
     mutateTracking(t => {
       if (!t.instances[inst.id]) return false;
       updateInstance(t, inst.id, {

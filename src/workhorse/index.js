@@ -89,6 +89,9 @@ const connection = new ServerConnection({
       case CMD.UNMANAGE:
         return instanceManager.unmanage(msg.instanceId);
 
+      case CMD.FLIP:
+        return await instanceManager.flip(msg.instanceId);
+
       case CMD.LIST_SESSIONS: {
         const sessions = listLocalSessions();
         connection.sendSessionsResult({ requestId: msg.requestId, sessions, success: true });

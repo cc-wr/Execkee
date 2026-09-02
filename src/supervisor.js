@@ -29,7 +29,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 18;
+const BRIEF_VERSION = 19;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -52,9 +52,9 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-// --- Supervise a Node child (server / subcontroller) with backoff ---
+// --- Supervise a child process (node server / subcontroller / gateway) with backoff ---
 
-function superviseNode(name, args, extraEnv) {
+function superviseProc(name, command, args, extraEnv) {
   const rec = { name, proc: null };
   nodeChildren.push(rec);
   let backoff = 1000;
@@ -65,7 +65,7 @@ function superviseNode(name, args, extraEnv) {
     startedAt = Date.now();
     log(name, `starting`);
     const env = extraEnv ? { ...process.env, ...extraEnv } : process.env;
-    const proc = spawn('node', args, { cwd: ROOT, stdio: 'inherit', env });
+    const proc = spawn(command, args, { cwd: ROOT, stdio: 'inherit', env });
     rec.proc = proc;
     proc.on('exit', (code) => {
       if (shuttingDown) return;
@@ -77,6 +77,75 @@ function superviseNode(name, args, extraEnv) {
     proc.on('error', (err) => log(name, `spawn error: ${err.message}`));
   }
   start();
+}
+
+function superviseNode(name, args, extraEnv) {
+  superviseProc(name, 'node', args, extraEnv);
+}
+
+// --- Local LLM gateway (agentgateway) ---
+// One per machine, supervised like the node children. Routes deepseek-* models to
+// DeepSeek (keyed) and everything else to Anthropic with NO stored key — the empty
+// provider params make the gateway forward the caller's own OAuth bearer, so Claude
+// subscription auth keeps working through it (machine-verified 2026-09-02, F1 tests).
+// The primary always routes through it; workhorse instances only when flipped.
+
+const GATEWAY_EXE = join(config.GATEWAY_DIR, process.platform === 'win32' ? 'agentgateway.exe' : 'agentgateway');
+const GATEWAY_CFG = join(config.GATEWAY_DIR, 'config.yaml');
+
+function defaultGatewayConfig() {
+  return [
+    '# Execkee LLM gateway config (agentgateway). Written once by the supervisor;',
+    '# edit freely — never overwritten. deepseek-* -> DeepSeek (DEEPSEEK_API_KEY from',
+    '# the environment); everything else -> Anthropic with NO key, which forwards the',
+    "# caller's own OAuth credentials (Claude subscription auth passes through).",
+    'llm:',
+    `  port: ${config.GATEWAY_PORT}`,
+    '  models:',
+    '  - name: "deepseek-v4-flash"',
+    '    provider: deepseek',
+    '    params:',
+    '      apiKey: "$DEEPSEEK_API_KEY"',
+    '  - name: "deepseek-v4-pro"',
+    '    provider: deepseek',
+    '    params:',
+    '      apiKey: "$DEEPSEEK_API_KEY"',
+    '  - name: "*"',
+    '    provider: anthropic',
+    '    params: {}',
+    '',
+  ].join('\n');
+}
+
+// The gateway is usable when enabled and installed. Checked at launch time for the
+// primary; if the binary is missing everything simply runs direct (no gateway).
+function gatewayAvailable() {
+  return config.GATEWAY_ENABLED && existsSync(GATEWAY_EXE);
+}
+
+function startGateway() {
+  if (!config.GATEWAY_ENABLED) { log('gateway', 'disabled (EXECKEE_GATEWAY=0)'); return false; }
+  if (!existsSync(config.GATEWAY_DIR)) mkdirSync(config.GATEWAY_DIR, { recursive: true });
+  if (!existsSync(GATEWAY_EXE)) {
+    log('gateway', `not installed — put the agentgateway binary at ${GATEWAY_EXE} ` +
+      '(github.com/agentgateway/agentgateway releases; verify the .sha256). ' +
+      'Until then the primary and flipped instances run direct to Anthropic.');
+    return false;
+  }
+  if (!existsSync(GATEWAY_CFG)) {
+    writeFileSync(GATEWAY_CFG, defaultGatewayConfig(), 'utf-8');
+    log('gateway', `wrote default config: ${GATEWAY_CFG}`);
+  }
+  if (!process.env.DEEPSEEK_API_KEY) {
+    log('gateway', 'DEEPSEEK_API_KEY is not set — deepseek models will fail through the gateway (claude models unaffected)');
+  }
+  // agentgateway v1.5.0 has no bind-address config: the data port listens on ALL
+  // interfaces. Loopback traffic never traverses the Windows Firewall, so an inbound
+  // block rule on the port keeps localhost working while shutting out the LAN — the
+  // supervisor cannot add it (needs elevation); it only reminds until one exists.
+  log('gateway', `starting on ${config.GATEWAY_URL} — ensure an inbound firewall block for TCP ${config.GATEWAY_PORT} (see README, "Gateway")`);
+  superviseProc('gateway', GATEWAY_EXE, ['-f', GATEWAY_CFG]);
+  return true;
 }
 
 // --- The primary Claude Code surface (a visible window in life-tasks) ---
@@ -176,7 +245,7 @@ function refreshPrimarySession() {
   }
 }
 
-function launchClaude(cwd, argLine) {
+function launchClaude(cwd, argLine, extraEnv) {
   // Pass the whole arg line as ONE PowerShell string with each value double-quoted,
   // so a multi-word seed reaches claude intact (an -ArgumentList @(...) array splits).
   const psArgLine = argLine.replace(/'/g, "''");
@@ -184,6 +253,9 @@ function launchClaude(cwd, argLine) {
   try {
     const out = execFileSync('powershell', ['-NoProfile', '-Command', psCmd], {
       encoding: 'utf-8', windowsHide: true, timeout: 15_000,
+      // Start-Process children inherit this powershell's environment, so extraEnv
+      // (e.g. ANTHROPIC_BASE_URL for gateway routing) reaches the claude window.
+      env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
     }).trim();
     return parseInt(out, 10) || null;
   } catch (err) {
@@ -218,17 +290,24 @@ function launchPrimaryWindow() {
   // RC session name. The primary relaunches via resume, so RC activates right after.
   const rc = config.REMOTE_CONTROL_ENABLED ? ' --remote-control' : '';
 
+  // The primary ALWAYS routes through the local gateway when it's installed: it gets
+  // all four Anthropic aliases on the user's subscription OAuth plus the deepseek
+  // models, with no billing change. Degrades silently to direct when not installed.
+  const viaGateway = gatewayAvailable();
+  const env = viaGateway ? { ANTHROPIC_BASE_URL: config.GATEWAY_URL } : null;
+  const gwTag = viaGateway ? ' [gateway]' : '';
+
   // Resume the prior primary conversation across restarts when we have a valid one.
   const resumeId = resumablePrimarySession();
   if (resumeId) {
-    const pid = launchClaude(cwd, `--dangerously-skip-permissions --resume ${resumeId} --settings "${settings}"${rc}`);
-    if (pid) { log('primary', `launched (resumed ${resumeId.slice(0, 8)})${rc ? ' [remote-control]' : ''} pid=${pid}`); return pid; }
+    const pid = launchClaude(cwd, `--dangerously-skip-permissions --resume ${resumeId} --settings "${settings}"${rc}`, env);
+    if (pid) { log('primary', `launched (resumed ${resumeId.slice(0, 8)})${rc ? ' [remote-control]' : ''}${gwTag} pid=${pid}`); return pid; }
     log('primary', 'resume launch produced no pid — falling back to a fresh primary');
   }
 
   // Fresh launch: snapshot sessions first so we can capture the new one, then seed.
   const before = new Set(listLocalSessions().map(s => s.sessionId));
-  const pid = launchClaude(cwd, `--dangerously-skip-permissions --settings "${settings}" "${PRIMARY_SEED}"`);
+  const pid = launchClaude(cwd, `--dangerously-skip-permissions --settings "${settings}" "${PRIMARY_SEED}"`, env);
   if (pid) schedulePrimaryCapture(before);
   log('primary', `launched fresh pid=${pid}`);
   return pid;
@@ -419,6 +498,24 @@ New/uncoded items **fail closed**: they stay off the dashboard until coded (seco
 automatic). If the user asks where a just-added task went while sensitive mode is on,
 that's why — it appears once coded (or immediately if innocuous, via \`refresh-tasks\`).
 
+## Model routing: the gateway and \`flip\`
+
+A local LLM gateway runs on each Execkee machine. Through it, one Claude Code
+window has BOTH the Anthropic models (fable/opus/haiku — still billed to the
+user's Claude subscription; the gateway holds no Anthropic key) AND the DeepSeek
+models (\`deepseek-v4-flash\`, \`deepseek-v4-pro\`, billed to the user's DeepSeek key).
+
+- **You (the primary) are always gateway-routed.** \`/model deepseek-v4-flash\`
+  works in your own window. An "unknown model" catalog warning on deepseek models
+  is cosmetic — ignore it.
+- **Workhorse instances run DIRECT by default.** When the user says "flip X",
+  "put X on the gateway", "give X deepseek", or "take X off the gateway", run
+  \`flip <instance-id>\` — it toggles the mode.
+- **Flip = quit + relaunch** (\`--resume\`), the same mechanism as a permission-mode
+  change: recent turns the live window held in memory but hadn't flushed can be
+  lost. **Warn the user and let them confirm before flipping an active instance**
+  (same rule as iss-5). The mode persists across crash-recovery relaunches.
+
 ## Commands (internal — never shown to the user)
 
 \`node "${CLI}" <command>\`:
@@ -440,6 +537,7 @@ that's why — it appears once coded (or immediately if innocuous, via \`refresh
 - \`create "<name>" [path] [--on <workhorse-id>]\` — new managed instance (on a chosen machine)
 - \`foreground <id>\` / \`hide <id>\` / \`close <id>\` — pull up / background / close (shuts the window; the session stays re-adoptable)
 - \`unmanage <id>\` — release / un-adopt (stop managing; leaves the window running)
+- \`flip <id>\` — quit + relaunch an instance, toggling gateway routing (see "Model routing" above; confirm with the user first — unflushed turns can drop)
 - \`resolve <issue-id> <message>\` — mark a dashboard issue resolved (space-delimited, no quotes)
 - \`issue add <text>\` — log a backlog item
 - \`sensitive hide\` / \`sensitive show\` / \`sensitive status\` — hide/show/query sensitive items on the browser dashboard (see "Sensitive mode" above)
@@ -629,6 +727,7 @@ function startController() {
     log('controller', 'brain-only: no co-located workhorse (set EXECKEE_LOCAL_WORKHORSE=1 to enable one)');
     purgeLocalWorkhorse();
   }
+  startGateway();
   superviseNode('server', ['src/server/index.js']);
   if (localWh) {
     setTimeout(() => {
@@ -647,6 +746,9 @@ function startController() {
 }
 
 function startWorkhorse() {
+  // The gateway runs on workhorse machines too: a FLIPPED instance's claude window
+  // connects to 127.0.0.1, so routing must be local to the machine that owns it.
+  startGateway();
   log('workhorse', `connecting to ${serverUrl} as ${workhorseId}`);
   superviseNode('workhorse', ['src/workhorse/index.js', serverUrl, workhorseId, workhorseName]);
 }

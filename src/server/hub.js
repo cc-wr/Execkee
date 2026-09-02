@@ -11,7 +11,7 @@ import config from '../common/config.js';
 // (id/name/sessionId/workhorseId/createdAt) are never overwritten from the wire.
 const WH_OWNED = ['pid', 'windowHandle', 'visibility', 'externallyHeld', 'crashCount',
   'heldBySubcontroller', 'watermark', 'lastReportTime', 'lastReportContent',
-  'reportFailureCount', 'lastReportError', 'lastActivityTime', 'skipPermissions'];
+  'reportFailureCount', 'lastReportError', 'lastActivityTime', 'skipPermissions', 'gatewayMode'];
 
 export class Hub {
   constructor({ port, onDashboardUpdate }) {

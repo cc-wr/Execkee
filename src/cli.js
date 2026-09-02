@@ -12,6 +12,7 @@
 //   node src/cli.js foreground <instance-id>   — bring instance to front
 //   node src/cli.js hide <instance-id>         — hide instance
 //   node src/cli.js close <instance-id>        — close instance
+//   node src/cli.js flip <instance-id>         — quit+relaunch, toggling gateway routing
 //   node src/cli.js dashboard                  — show dashboard data
 //   node src/cli.js sensitive hide|show        — hide/show sensitive items on the
 //                                                browser dashboard (CLI unaffected)
@@ -268,6 +269,28 @@ switch (cmd) {
       instanceId,
     });
     console.log(result.success !== false ? 'Hidden.' : `Failed: ${result.error}`);
+    break;
+  }
+
+  // Quit + relaunch an instance, toggling whether it routes through the local LLM
+  // gateway (Anthropic on the user's own OAuth + deepseek models) or runs direct.
+  case 'flip': {
+    const [instanceId] = args;
+    if (!instanceId) { console.error('Usage: flip <instance-id>'); process.exit(1); }
+    const state = await api('/api/state');
+    const inst = state.instances?.find(i => i.id === instanceId);
+    if (!inst) { console.error('Instance not found'); process.exit(1); }
+    const result = await api('/api/dispatch', 'POST', {
+      workhorseId: inst.workhorseId,
+      command: 'flip',
+      instanceId,
+    });
+    if (result.success === false) { console.log(`Failed: ${result.error}`); break; }
+    // The ACK carries only success/error; the new mode is the toggle of what the
+    // controller mirror showed before the flip.
+    console.log(!inst.gatewayMode
+      ? 'Flipped ONTO the gateway — relaunched; deepseek models now available in this instance (/model deepseek-v4-flash), claude models stay on the subscription.'
+      : 'Flipped OFF the gateway — relaunched direct to Anthropic.');
     break;
   }
 
