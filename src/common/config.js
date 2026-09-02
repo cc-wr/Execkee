@@ -120,7 +120,13 @@ export default Object.freeze({
   // unless ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is set, and setting either would
   // replace the subscription OAuth credential this whole design exists to preserve.
   // Verified 2026-09-02: with OAuth, Claude Code never requests GET /v1/models.)
-  GATEWAY_CUSTOM_MODEL: process.env.EXECKEE_GATEWAY_CUSTOM_MODEL || 'deepseek-v4-flash',
+  // The [1m] suffix declares the model's 1M context window to Claude Code, which
+  // otherwise assumes 200k for a model outside its catalog and auto-compacts a
+  // gateway-routed session five times earlier than it needs to. The suffix is
+  // client-side only — Claude Code strips it before the wire, so the gateway still
+  // matches the plain `deepseek-v4-flash` route (verified 2026-09-02: the literal
+  // suffixed id instead falls through the wildcard to Anthropic and 401s).
+  GATEWAY_CUSTOM_MODEL: process.env.EXECKEE_GATEWAY_CUSTOM_MODEL || 'deepseek-v4-flash[1m]',
   GATEWAY_CUSTOM_MODEL_NAME: process.env.EXECKEE_GATEWAY_CUSTOM_MODEL_NAME || 'DeepSeek v4 Flash',
   GATEWAY_ENABLED: process.env.EXECKEE_GATEWAY !== '0',
   GATEWAY_PORT: Number(process.env.EXECKEE_GATEWAY_PORT) || 4000,
