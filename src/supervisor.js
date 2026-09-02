@@ -30,7 +30,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 19;
+const BRIEF_VERSION = 20;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -89,7 +89,9 @@ function superviseNode(name, args, extraEnv) {
 // DeepSeek (keyed) and everything else to Anthropic with NO stored key — the empty
 // provider params make the gateway forward the caller's own OAuth bearer, so Claude
 // subscription auth keeps working through it (machine-verified 2026-09-02, F1 tests).
-// The primary always routes through it; workhorse instances only when flipped.
+// Nothing routes through it by default: the primary is direct unless
+// EXECKEE_GATEWAY_PRIMARY=1, and workhorse instances only once flipped. It still runs
+// on every machine so a flip has something to attach to.
 
 const GATEWAY_EXE = join(config.GATEWAY_DIR, process.platform === 'win32' ? 'agentgateway.exe' : 'agentgateway');
 const GATEWAY_CFG = join(config.GATEWAY_DIR, 'config.yaml');
@@ -365,11 +367,10 @@ function launchPrimaryWindow() {
   // RC session name. The primary relaunches via resume, so RC activates right after.
   const rc = config.REMOTE_CONTROL_ENABLED ? ' --remote-control' : '';
 
-  // The primary ALWAYS routes through the local gateway when one is actually LISTENING
-  // (installed is not enough — a primary pointed at a dead gateway fails every
-  // request). Through it the primary gets the Anthropic aliases on the user's
-  // subscription OAuth plus the deepseek models, with no billing change.
-  const viaGateway = config.GATEWAY_ENABLED && gatewayUp;
+  // The primary runs DIRECT to Anthropic unless EXECKEE_GATEWAY_PRIMARY=1 opts it in
+  // (see config). Even opted in it must see a gateway actually LISTENING — installed
+  // is not enough, since a primary pointed at a dead gateway fails every request.
+  const viaGateway = config.GATEWAY_ENABLED && config.GATEWAY_PRIMARY && gatewayUp;
   const env = viaGateway ? { ANTHROPIC_BASE_URL: config.GATEWAY_URL, ...gatewayModelEnv() } : null;
   const gwTag = viaGateway ? ' [gateway]' : '';
 
@@ -393,10 +394,9 @@ let primaryRelaunches = [];
 async function startPrimary() {
   ensureLifeTasksScaffold();
   ensurePrimaryFolderTrusted();
-  // Give the gateway a moment to come up (it may still be binding, or another
-  // Execkee process on this machine may own it) so a cold start yields a ROUTED
-  // primary. If it never appears, launch direct rather than into a dead proxy.
-  if (config.GATEWAY_ENABLED && existsSync(GATEWAY_EXE) && !(await waitForGateway(20_000))) {
+  // Only wait on the gateway when the primary is actually opted in to it — a direct
+  // primary must not be delayed by a component it does not use.
+  if (config.GATEWAY_PRIMARY && config.GATEWAY_ENABLED && existsSync(GATEWAY_EXE) && !(await waitForGateway(20_000))) {
     log('primary', 'gateway not reachable — launching the primary direct to Anthropic (no deepseek models this session)');
   }
   primaryPid = launchPrimaryWindow();
@@ -587,9 +587,11 @@ window has BOTH the Anthropic models (fable/opus/haiku — still billed to the
 user's Claude subscription; the gateway holds no Anthropic key) AND the DeepSeek
 models (\`deepseek-v4-flash\`, \`deepseek-v4-pro\`, billed to the user's DeepSeek key).
 
-- **You (the primary) are always gateway-routed.** \`/model deepseek-v4-flash\`
-  works in your own window. An "unknown model" catalog warning on deepseek models
-  is cosmetic — ignore it.
+- **You (the primary) run DIRECT to Anthropic, not through the gateway.** You are
+  the control surface, so you stay on the plainest path — the gateway being down or
+  restarting can never affect you. The deepseek models are therefore NOT in your own
+  \`/model\` picker; that is deliberate, not a fault. (An operator can opt you in with
+  EXECKEE_GATEWAY_PRIMARY=1, but the default is direct.)
 - **Workhorse instances run DIRECT by default.** When the user says "flip X",
   "put X on the gateway", "give X deepseek", or "take X off the gateway", run
   \`flip <instance-id>\` — it toggles the mode.

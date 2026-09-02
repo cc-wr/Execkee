@@ -432,8 +432,13 @@ Each machine's supervisor runs a local **agentgateway** (`~/.execkee/agentgatewa
 when the binary is present. It routes by model name: `deepseek-v4-flash` /
 `deepseek-v4-pro` go to DeepSeek (needs `DEEPSEEK_API_KEY` in the environment);
 every other model goes to Anthropic with **no stored key** — the caller's own OAuth
-credentials pass through, so Claude-subscription billing is unchanged. The primary
-always routes through it; workhorse instances run direct unless `flip`ped.
+credentials pass through, so Claude-subscription billing is unchanged.
+
+**Nothing routes through it by default.** The primary (controller) session runs direct
+to Anthropic so the control surface never depends on the gateway being up — set
+`EXECKEE_GATEWAY_PRIMARY=1` to opt it in. Workhorse instances are direct too until you
+`flip` one. The gateway still runs on every machine so a `flip` has something to
+attach to.
 
 Install: download `agentgateway-windows-amd64.exe` from the
 [agentgateway releases](https://github.com/agentgateway/agentgateway/releases),

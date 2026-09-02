@@ -128,6 +128,13 @@ export default Object.freeze({
   // suffixed id instead falls through the wildcard to Anthropic and 401s).
   GATEWAY_CUSTOM_MODEL: process.env.EXECKEE_GATEWAY_CUSTOM_MODEL || 'deepseek-v4-flash[1m]',
   GATEWAY_CUSTOM_MODEL_NAME: process.env.EXECKEE_GATEWAY_CUSTOM_MODEL_NAME || 'DeepSeek v4 Flash',
+  // The PRIMARY (controller) session runs DIRECT to Anthropic by default — it is the
+  // control surface, so it stays on the plainest possible path and is never affected
+  // by the gateway being down, mid-restart, or lagging a Claude Code beta. Set
+  // EXECKEE_GATEWAY_PRIMARY=1 to route it through the gateway (gaining the deepseek
+  // models in its own /model picker). Workhorse instances are unaffected either way:
+  // they are direct by default and opt in per instance via `flip`.
+  GATEWAY_PRIMARY: process.env.EXECKEE_GATEWAY_PRIMARY === '1',
   GATEWAY_ENABLED: process.env.EXECKEE_GATEWAY !== '0',
   GATEWAY_PORT: Number(process.env.EXECKEE_GATEWAY_PORT) || 4000,
   GATEWAY_URL: `http://127.0.0.1:${Number(process.env.EXECKEE_GATEWAY_PORT) || 4000}`,
