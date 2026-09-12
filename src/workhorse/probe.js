@@ -103,6 +103,11 @@ function buildPrompt(begin, end) {
     `First, a line containing only ${begin}.`,
     'Then a line: TOPIC: <a short title>.',
     'Then a line: STATUS: <2 to 4 sentences on what is done, what is in progress, what is blocked, and what needs attention>.',
+    // The dashboard builds its "From your instances" list ONLY from these two fields
+    // (cowork.js derives presumedTasks from needsAttention + blocked). Without them a
+    // probe report carries a summary and nothing actionable, and that panel stays empty.
+    'Then a line: ATTENTION: <action items that need the user, separated by semicolons, or the word none>.',
+    'Then a line: BLOCKED: <things that cannot proceed, separated by semicolons, or the word none>.',
     `Then a line containing only ${end} and stop. Do not write anything below that line.`,
   ].join(' ');
 }
@@ -149,13 +154,25 @@ function extractReport(frame, begin, end) {
   const body = lines.slice(bi + 1, ei).filter(Boolean);
   let topic = '(probe)';
   const summaryParts = [];
+  const attentionParts = [];
+  const blockedParts = [];
+  // A wrapped line belongs to whichever field is still open, so continuations of
+  // ATTENTION / BLOCKED don't land in the summary (the old parser sent every
+  // unmatched line there, which was safe only while STATUS was the last field).
+  let current = summaryParts;
   for (const l of body) {
     if (l.includes(begin) || l.includes(end)) continue;
     const mt = l.match(/TOPIC:\s*(.*)$/i);
+    if (mt) { topic = mt[1].trim() || topic; current = summaryParts; continue; }
     const ms = l.match(/STATUS:\s*(.*)$/i);
-    if (mt) { topic = mt[1].trim() || topic; continue; }
-    if (ms) { if (ms[1].trim()) summaryParts.push(ms[1].trim()); continue; }
-    summaryParts.push(l); // continuation of a wrapped STATUS line
+    if (ms) { if (ms[1].trim()) summaryParts.push(ms[1].trim()); current = summaryParts; continue; }
+    // Anchored (allowing a bullet/dash), unlike TOPIC/STATUS above: an unanchored
+    // match would fire on a STATUS sentence such as "nothing blocked: all clear".
+    const ma = l.match(/^[-*\s]*ATTENTION:\s*(.*)$/i);
+    if (ma) { if (ma[1].trim()) attentionParts.push(ma[1].trim()); current = attentionParts; continue; }
+    const mb = l.match(/^[-*\s]*BLOCKED:\s*(.*)$/i);
+    if (mb) { if (mb[1].trim()) blockedParts.push(mb[1].trim()); current = blockedParts; continue; }
+    current.push(l);
   }
   const summary = summaryParts.join(' ').replace(/\s+/g, ' ').trim();
   if (!summary) return null;
@@ -164,11 +181,20 @@ function extractReport(frame, begin, end) {
     summary,
     recentWork: [],
     inProgress: [],
-    blocked: [],
+    blocked: splitItems(blockedParts.join(' ')),
     completed: [],
-    needsAttention: [],
+    needsAttention: splitItems(attentionParts.join(' ')),
     probe: true,
   };
+}
+
+// "a; b; none" -> ['a', 'b']. Semicolons separate items; an explicit no-items answer
+// (none / n/a / nothing) is dropped rather than becoming a task called "none".
+function splitItems(s) {
+  return String(s || '')
+    .split(';')
+    .map(x => x.trim().replace(/^[-*\s]+/, ''))
+    .filter(x => x && !/^(none|n\/?a|nothing|no items?)\.?$/i.test(x));
 }
 
 // Drive `inst`'s live window to produce a report. Returns one of:
