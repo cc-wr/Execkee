@@ -100,6 +100,29 @@ dashboard.onListScheduledGuesses = async () => {
   return listScheduledGuesses();
 };
 
+// Long-term pool: a store separate from tasks.json, with no due/start date and no
+// rollover. Add and remove only; promote moves an item into the daily backlog.
+dashboard.onLongTerm = async ({ action, text, id, due }) => {
+  const m = await import('../cowork.js');
+  let result;
+  if (action === 'add') result = m.addLongTermTask(text);
+  else if (action === 'rm') result = m.removeLongTermTask(id || text);
+  else if (action === 'promote') result = m.promoteLongTermTask(id || text, due);
+  else if (action === 'list') return { success: true, items: m.listLongTermTasks() };
+  else return { success: false, error: `Unknown long-term action '${action}'` };
+  // A promote lands a task in the backlog, so the daily plan needs rebuilding too.
+  if (result.success && action === 'promote') m.refreshDashboardTasks();
+  else if (result.success) {
+    const { readDashboardData, writeDashboardData } = await import('../common/store.js');
+    const d = readDashboardData();
+    d.longTermTasks = m.listLongTermTasks();
+    d.updatedBy = 'long-term';
+    writeDashboardData(d);
+  }
+  dashboard.pushUpdate();
+  return result;
+};
+
 // Force a fresh tracked-file task guess now (doesn't wait for the daily rollover).
 dashboard.onRegenerateGuesses = async () => {
   const { regenerateGuesses } = await import('../cowork.js');

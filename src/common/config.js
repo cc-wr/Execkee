@@ -41,6 +41,9 @@ export default Object.freeze({
   SENSITIVITY_FILE: join(SHARED_STORE_DIR, 'sensitivity.json'), // LLM sensitivity codings + manual overrides
   SENSITIVE_FLAG_FILE: join(SHARED_STORE_DIR, 'sensitive-flag.json'), // hide-sensitive toggle (own file: state.json is hub-rebuilt, sensitivity.json is RMW'd across model calls)
   LIFE_TASKS_FILE: join(LIFE_TASKS_DIR, 'tasks.json'),
+  // Long-term pool: a SEPARATE store from tasks.json. No due date, no start date, no
+  // daily rollover — items sit here until the user removes or promotes one.
+  LONG_TERM_FILE: join(LIFE_TASKS_DIR, 'long-term.json'),
   TRACKING_LOG_FILE: join(LIFE_TASKS_DIR, 'TRACKING.md'),  // primary's markdown log (context-sources.js) — NOT the JSON store
   // Manifest of extra files the cycle synthesis reads as context (a life-tasks
   // .docx, notes, etc.) — { sources: [{ path, label }] }.

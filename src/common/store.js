@@ -23,6 +23,7 @@ export function readDashboardData() {
     sentence: null,
     standby: true,
     dailyTasks: [],
+    longTermTasks: [],
     presumedTasks: [],
     instanceStatus: [],
     flaggedEvents: [],
@@ -137,6 +138,19 @@ export function logResolution(issueId, message) {
 }
 
 // --- Life Tasks ---
+
+// --- Long-term pool (separate from the daily backlog) ---
+// Items carry no due/start date and never roll over. Add and remove only; a promote
+// moves one into tasks.json instead. Deliberately NOT guarded like writeLifeTasks:
+// removing the last item is a legitimate, user-driven empty here.
+
+export function readLongTermTasks() {
+  return readJson(config.LONG_TERM_FILE, { tasks: [] });
+}
+
+export function writeLongTermTasks(data) {
+  writeJson(config.LONG_TERM_FILE, { tasks: (data && data.tasks) || [] });
+}
 
 export function readLifeTasks() {
   return readJson(config.LIFE_TASKS_FILE, { tasks: [] });

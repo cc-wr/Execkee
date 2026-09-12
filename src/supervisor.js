@@ -30,7 +30,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 20;
+const BRIEF_VERSION = 21;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -615,6 +615,7 @@ models (\`deepseek-v4-flash\`, \`deepseek-v4-pro\`, billed to the user's DeepSee
 - \`defer "<topic>" [--until YYYY-MM-DD]\` — put a topic on hold; the cycle then suppresses its related **instance-surfaced (presumed) tasks** and sentences (until the date, if given)
 - \`undefer <id|topic>\` — lift a deferral (related items return next cycle)
 - \`deferrals\` — list active deferrals
+- \`long-term add "<text>"\` / \`long-term\` / \`long-term rm <id|text>\` / \`long-term promote <id|text> [--due YYYY-MM-DD]\` — the long-term pool (see "The long-term list" above)
 - \`schedule-guess "<text>" --on YYYY-MM-DD [--until YYYY-MM-DD] [--horizon]\` — surface a task as a tentative **guess** starting on a date (then it flows through approve/reject); \`--horizon\` puts it in the "Tracked · no instance" panel instead of today's tentatives
 - \`unschedule-guess <id|text>\` / \`scheduled-guesses\` — remove / list scheduled guesses
 - \`manage <session-id> [name] [--on <workhorse-id>] [--from-now] [--open] [--full-permissions]\` — adopt; auto-routes to the session's own workhorse (\`--on\` forces one). Baseline by default. \`--full-permissions\` runs it unattended (skips approval prompts).
@@ -662,6 +663,28 @@ re-reads the tasks and updates the dashboard; no synthesis, instant.)
 When you mark a task done, set \`completedAt\` to an ISO date or timestamp (e.g.
 \`2026-06-16\` or \`2026-06-16T14:00:00Z\`) — the daily plan archives items completed
 before today, so a non-date value would wrongly hide a just-finished task.
+
+## The long-term list (a SEPARATE pool)
+
+A second, standing list for things with **no deadline and no start date** — "someday"
+work the user wants recorded but not scheduled. It is a different store from the task
+list above (\`long-term.json\`, not \`tasks.json\`), shows in its own **Approved · long
+term** dashboard panel, and takes NO part in the daily plan, the donut, or the daily
+rollover. It simply sits there until the user removes or promotes an item.
+
+**Never edit this file by hand — use the command.** Unlike the task store, this pool is
+reached only through \`long-term\`:
+
+- "add X to my long-term list" / "someday I want to X" / "park X for later" →
+  \`long-term add "X"\`
+- "what's on my long-term list" → \`long-term\`
+- "drop X from long term" → \`long-term rm <id|text>\`
+- "I'm ready to start X" / "move X onto my actual list" →
+  \`long-term promote <id|text>\`, adding \`--due YYYY-MM-DD\` only if the user gave a
+  date. Promote moves it: it leaves the long-term pool and becomes a normal task.
+
+Items have no due date, no priority and no completion state — do not try to set any.
+To finish one, promote it and then complete it as a normal task.
 
 ## Today's plan + tentative guesses (your approval gate)
 

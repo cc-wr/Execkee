@@ -32,6 +32,7 @@ export class DashboardServer {
     this.onScheduleGuess = null; // set by index.js; schedule a future guessed task
     this.onUnscheduleGuess = null; // set by index.js; remove a scheduled guess
     this.onListScheduledGuesses = null; // set by index.js; list scheduled guesses
+    this.onLongTerm = null; // set by index.js; long-term pool add/rm/promote/list
   }
 
   start() {
@@ -140,6 +141,10 @@ export class DashboardServer {
 
     if (url.pathname === '/api/deferrals') {
       return this._handleApiDeferrals(req, res);
+    }
+
+    if (url.pathname === '/api/long-term' && req.method === 'POST') {
+      return this._handleApiLongTerm(req, res);
     }
 
     if (url.pathname === '/api/schedule-guess' && req.method === 'POST') {
@@ -328,6 +333,26 @@ export class DashboardServer {
       this.pushUpdate();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, hidden: isSensitiveHidden(), overrides: listOverrides().length }));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  // Long-term pool: a store separate from tasks.json, reached only through the
+  // `long-term` command. One endpoint for add / rm / promote / list.
+  async _handleApiLongTerm(req, res) {
+    const body = await this._readBody(req);
+    if (!this.onLongTerm) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'No long-term handler wired' }));
+      return;
+    }
+    try {
+      const { action, text, id, due } = JSON.parse(body || '{}');
+      const result = await this.onLongTerm({ action, text, id, due });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: err.message }));

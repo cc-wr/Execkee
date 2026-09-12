@@ -206,6 +206,10 @@
         <div id="plist"></div>
       </div>
       <div class="panel" style="flex:0 0 auto;">
+        <h2>Approved <span style="color:var(--muted);font-weight:600">· long term</span></h2>
+        <div id="ltlist"></div>
+      </div>
+      <div class="panel" style="flex:0 0 auto;">
         <h2>Tracked <span style="color:var(--muted);font-weight:600">· no instance</span></h2>
         <div id="covlist"></div>
       </div>
@@ -272,6 +276,14 @@
         const prio=t.priority||'normal';
         return `<div class="pitem"><span class="pbullet">▸</span><span class="ptext">${esc(t.text)}</span><span class="chip prio-${prio}">${prio}</span>${tag}</div>`;
       }).join('') : '<div class="empty">No tracked tasks beyond today.</div>';
+
+      // long-term pool: a separate store, added only by the `long-term` command. No
+      // due date, no completion and no priority, so the row is plain text — a check
+      // circle would imply an action this panel does not have.
+      const lt=data.longTermTasks||[];
+      document.getElementById('ltlist').innerHTML = lt.length ? lt.map(t=>
+        `<div class="pitem"><span class="pbullet">▸</span><span class="ptext">${esc(t.text)}</span></div>`
+      ).join('') : '<div class="empty">Nothing on the long-term list.</div>';
 
       // instance count (header indicator; the per-instance panel was removed)
       const insts=data.instanceStatus||[];

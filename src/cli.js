@@ -13,6 +13,7 @@
 //   node src/cli.js hide <instance-id>         — hide instance
 //   node src/cli.js close <instance-id>        — close instance
 //   node src/cli.js flip <instance-id>         — quit+relaunch, toggling gateway routing
+//   node src/cli.js long-term [add|rm|promote]  — long-term pool (no due/start date)
 //   node src/cli.js dashboard                  — show dashboard data
 //   node src/cli.js sensitive hide|show        — hide/show sensitive items on the
 //                                                browser dashboard (CLI unaffected)
@@ -343,6 +344,41 @@ switch (cmd) {
       ? 'Sensitive items are HIDDEN from the browser dashboard (CLI output unaffected).'
       : 'Sensitive items are VISIBLE on the browser dashboard.');
     console.log(`Manual overrides: ${r.overrides}`);
+    break;
+  }
+
+  // Long-term pool — a store SEPARATE from the daily task list. No due date, no start
+  // date, no rollover. Items appear only here until removed or promoted.
+  case 'long-term':
+  case 'longterm': {
+    const action = args[0] || 'list';
+    if (!['list', 'add', 'rm', 'remove', 'promote'].includes(action)) {
+      console.log('Usage: long-term [list] | add "<text>" | rm <id|text> | promote <id|text> [--due YYYY-MM-DD]');
+      break;
+    }
+    const rest = args.slice(1);
+    const dueIdx = rest.indexOf('--due');
+    const due = dueIdx >= 0 ? rest[dueIdx + 1] : null;
+    const words = (dueIdx >= 0 ? rest.slice(0, dueIdx) : rest).join(' ').trim();
+
+    if (action === 'list') {
+      const r = await api('/api/long-term', 'POST', { action: 'list' });
+      const items = r.items || [];
+      if (!items.length) { console.log('(long-term list is empty)'); break; }
+      for (const t of items) console.log(`  ${t.id}  ${t.text}`);
+      break;
+    }
+    if (!words) { console.log(`Usage: long-term ${action} "<text or id>"`); break; }
+    const r = await api('/api/long-term', 'POST', {
+      action: action === 'remove' ? 'rm' : action,
+      text: words,
+      id: words,
+      due,
+    });
+    if (r.success === false) { console.log(`Failed: ${r.error}`); break; }
+    if (action === 'add') console.log(`Added to long-term: "${words}"`);
+    else if (action === 'promote') console.log(`Promoted to the daily list${r.due ? ` (due ${r.due})` : ''}: "${r.text}"`);
+    else console.log(`Removed from long-term: "${words}"`);
     break;
   }
 

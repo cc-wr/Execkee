@@ -402,6 +402,11 @@ node src/cli.js sensitive mark|unmark "<text>" permanently force an item hidden 
 node src/cli.js plan                           today's plan (confirmed + tentative guesses, with ids)
 node src/cli.js approve-task <id> | --all      approve a tentative guessed task (promotes to backlog)
 node src/cli.js reject-task <id>               drop a tentative guessed task
+node src/cli.js long-term                     list the long-term pool (no due/start date)
+node src/cli.js long-term add "<text>"         add to it
+node src/cli.js long-term rm <id|text>         remove from it
+node src/cli.js long-term promote <id|text> [--due YYYY-MM-DD]
+                                               move it into the daily task list
 node src/cli.js regenerate-guesses             force a fresh tracked-file task guess now
 node src/cli.js schedule-guess "<text>" --on YYYY-MM-DD [--until YYYY-MM-DD] [--horizon]
 node src/cli.js unschedule-guess <id|text>

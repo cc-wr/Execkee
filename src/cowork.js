@@ -6,6 +6,7 @@ import {
   readCycleReport, writeCycleReport,
   readDailyTasks, writeDailyTasks,
   readLifeTasks, writeLifeTasks,
+  readLongTermTasks, writeLongTermTasks,
   readResolutions, writeResolutions,
   readDailyPlan, writeDailyPlan,
   readDailyPlanArchive, writeDailyPlanArchive,
@@ -109,6 +110,7 @@ export async function runCoworkCycle(hub) {
     standby: !sentenceQueue.major,
     dailyTasks: planTodayItems(freshPlan.items),
     coverageTasks: planHorizonCoverage(freshPlan.items),
+    longTermTasks: listLongTermTasks(),
     presumedTasks,
     instanceStatus: instances
       .filter(i => i.desiredState === DESIRED_STATE.ALIVE)
@@ -346,6 +348,7 @@ function writePlanToDashboard(plan) {
   const data = readDashboardData();
   data.dailyTasks = planTodayItems(plan.items);
   data.coverageTasks = planHorizonCoverage(plan.items);
+  data.longTermTasks = listLongTermTasks();
   data.updatedBy = 'task-refresh';
   writeDashboardData(data);
 }
@@ -512,6 +515,7 @@ export async function addDeferral(topic, until) {
   const dash = readDashboardData();
   dash.dailyTasks = planTodayItems(plan.items);
   dash.coverageTasks = planHorizonCoverage(plan.items);
+  dash.longTermTasks = listLongTermTasks();
   dash.presumedTasks = presumed.filter(p => keptIds.has(String(p.id)));
   dash.updatedBy = 'task-refresh';
   writeDashboardData(dash);
@@ -683,6 +687,67 @@ export function listScheduledGuesses() {
   return readScheduledGuesses().items || [];
 }
 
+// ---- Long-term pool -------------------------------------------------------
+// A store SEPARATE from tasks.json, reached only through these calls (the `long-term`
+// command). Items carry no due or start date, take no part in the daily plan, the
+// donut, or the rollover, and are never guessed — they exist only when the user adds
+// one. Add and remove only; `promote` is the one path from here into the daily list.
+
+export function listLongTermTasks() {
+  return readLongTermTasks().tasks || [];
+}
+
+export function addLongTermTask(text) {
+  const t = String(text || '').trim();
+  if (!t) return { success: false, error: 'Text required' };
+  const store = readLongTermTasks();
+  store.tasks = store.tasks || [];
+  if (store.tasks.some(x => normText(x.text) === normText(t))) {
+    return { success: false, error: 'Already on the long-term list' };
+  }
+  const id = `lt-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  store.tasks.push({ id, text: t, createdAt: new Date().toISOString() });
+  writeLongTermTasks(store);
+  return { success: true, id, text: t };
+}
+
+export function removeLongTermTask(idOrText) {
+  const key = normText(idOrText);
+  const store = readLongTermTasks();
+  const before = (store.tasks || []).length;
+  store.tasks = (store.tasks || []).filter(x => x.id !== idOrText && normText(x.text) !== key);
+  writeLongTermTasks(store);
+  return store.tasks.length < before
+    ? { success: true }
+    : { success: false, error: 'No matching long-term task' };
+}
+
+// Move a long-term item into the daily backlog (tasks.json). It leaves the long-term
+// pool in the same call, so an item is never on both lists. `due` is optional — a
+// promoted task with no due date is a normal undated backlog task.
+export function promoteLongTermTask(idOrText, due) {
+  const key = normText(idOrText);
+  const store = readLongTermTasks();
+  const item = (store.tasks || []).find(x => x.id === idOrText || normText(x.text) === key);
+  if (!item) return { success: false, error: 'No matching long-term task' };
+
+  const life = readLifeTasks();
+  life.tasks = life.tasks || [];
+  if (!life.tasks.some(x => normText(x.text) === normText(item.text))) {
+    life.tasks.push({
+      id: `task-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
+      text: item.text,
+      due: due || null,
+      priority: 'normal',
+      completedAt: null,
+    });
+    writeLifeTasks(life);
+  }
+  store.tasks = store.tasks.filter(x => x !== item);
+  writeLongTermTasks(store);
+  return { success: true, text: item.text, due: due || null };
+}
+
 // Force a fresh tentative-task guess from the tracked files NOW, without waiting for
 // the daily (midnight) rollover. Runs the LLM guesser and replaces the day's guesses;
 // does NOT archive (it's still the same day). Used by the `regenerate-guesses`
@@ -745,7 +810,7 @@ async function authorCycleReport({ cycleTime, today, dailyTasks, instanceReports
           due: t.due || null,
           urgency: t.urgency || 'normal',
         })).filter(t => t.text),
-        readLifeTasks().tasks   // full backlog incl. completed history (iss-3)
+        dedupeBaseline()   // full backlog incl. completed history (iss-3) + long-term pool
       ),
       rawThinking: parsed.thinking || '',
     };
@@ -907,7 +972,7 @@ function buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueToda
       presumedTasks.push({ id: `presumed-${presumedTasks.length}`, instance: r.name, text: x, due: null, urgency: 'normal' });
     }
   }
-  presumedTasks = dedupePresumedTasks(presumedTasks, readLifeTasks().tasks); // full backlog (iss-3)
+  presumedTasks = dedupePresumedTasks(presumedTasks, dedupeBaseline()); // full backlog (iss-3) + long-term
 
   return {
     timestamp: cycleTime,
@@ -925,6 +990,13 @@ function buildFallbackReport({ cycleTime, instanceReports, overdueTasks, dueToda
 // significant (>3-char) words of one appearing in the other (the same by-name
 // discipline as matchInstance). Callers pass the FULL backlog (incl. completed
 // history), so finished work is deduped out even when its wording differs.
+// What a presumed task is deduped against: the full backlog (including completed
+// history, iss-3) plus the long-term pool, so an instance cannot resurface something
+// the user has already parked for later.
+function dedupeBaseline() {
+  return [...(readLifeTasks().tasks || []), ...(readLongTermTasks().tasks || [])];
+}
+
 function dedupePresumedTasks(presumed, tasks) {
   const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const sig = (s) => s.split(' ').filter(w => w.length > 3);
