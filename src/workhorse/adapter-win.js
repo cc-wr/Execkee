@@ -75,8 +75,16 @@ public class ExeckeeWin32 {
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern IntPtr GetSystemMenu(IntPtr hWnd, bool bRevert);
     [DllImport("user32.dll")] public static extern bool DeleteMenu(IntPtr hMenu, uint uPosition, uint uFlags);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
+    public struct RECT { public int Left, Top, Right, Bottom; }
     public const int SW_HIDE = 0;
+    public const int SW_SHOW = 5;
     public const int SW_RESTORE = 9;
+    public const int SM_CXSCREEN = 0;
+    public const int SM_CYSCREEN = 1;
     public const uint SC_CLOSE = 0xF060;
     public const uint MF_BYCOMMAND = 0x0;
 }
@@ -156,7 +164,34 @@ switch ($Action) {
     "show" {
         $hwnd = [IntPtr][int64]$Handle
         if ([ExeckeeWin32]::IsWindow($hwnd)) {
-            [ExeckeeWin32]::ShowWindow($hwnd, [ExeckeeWin32]::SW_RESTORE) | Out-Null
+            # SW_RESTORE is correct ONLY for a minimized window. On anything else it
+            # un-maximizes: a hidden-while-maximized window came back at its smaller
+            # restore rect (measured 1936x1056 -> 993x519), so every hide/show quietly
+            # shrank the user's window. SW_SHOW redisplays at the current size instead.
+            if ([ExeckeeWin32]::IsIconic($hwnd)) {
+                [ExeckeeWin32]::ShowWindow($hwnd, [ExeckeeWin32]::SW_RESTORE) | Out-Null
+            } else {
+                [ExeckeeWin32]::ShowWindow($hwnd, [ExeckeeWin32]::SW_SHOW) | Out-Null
+            }
+            # Size floor. Managed windows have been found collapsed to 24x55 — border
+            # and title bar only — with that size persisted in the restore rect, so
+            # showing them returns a sliver. What writes that rect is NOT established
+            # (Execkee calls no sizing API), so this is a guard, not a root-cause fix:
+            # hand back a usable window rather than an unusable one.
+            $rect = New-Object ExeckeeWin32+RECT
+            if ([ExeckeeWin32]::GetWindowRect($hwnd, [ref]$rect)) {
+                $curW = $rect.Right - $rect.Left
+                $curH = $rect.Bottom - $rect.Top
+                if ($curW -lt 500 -or $curH -lt 400) {
+                    $scrW = [ExeckeeWin32]::GetSystemMetrics([ExeckeeWin32]::SM_CXSCREEN)
+                    $scrH = [ExeckeeWin32]::GetSystemMetrics([ExeckeeWin32]::SM_CYSCREEN)
+                    $newW = [Math]::Min(1200, $scrW)
+                    $newH = [Math]::Min(800, $scrH)
+                    $newX = [int](($scrW - $newW) / 2)
+                    $newY = [int](($scrH - $newH) / 2)
+                    [ExeckeeWin32]::MoveWindow($hwnd, $newX, $newY, $newW, $newH, $true) | Out-Null
+                }
+            }
             [ExeckeeWin32]::SetForegroundWindow($hwnd) | Out-Null
             Write-Output "ok"
         } else {
