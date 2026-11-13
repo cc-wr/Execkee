@@ -85,7 +85,10 @@ export class ServerConnection {
     }));
   }
 
-  sendReportResult({ instanceId, report, success, error, watermark, requestId }) {
+  // `skipped` distinguishes a deliberate no-op (foregrounded, or nothing new since
+  // the last probe) from a real failure. Without it the controller cannot tell them
+  // apart and logs both as FAIL.
+  sendReportResult({ instanceId, report, success, error, skipped, watermark, requestId }) {
     if (!this.connected) return;
     this.ws.send(makeMessage(MSG.REPORT_RESULT, {
       workhorseId: this.workhorseId,
@@ -93,6 +96,7 @@ export class ServerConnection {
       report,
       success,
       error,
+      skipped,
       watermark,
       requestId,
     }));

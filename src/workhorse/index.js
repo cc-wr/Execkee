@@ -71,6 +71,7 @@ const connection = new ServerConnection({
           report: result.report,
           success: result.success,
           error: result.error,
+          skipped: result.skipped,
           watermark: result.watermark,
           requestId: msg.requestId,
         });

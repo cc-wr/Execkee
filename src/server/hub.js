@@ -320,7 +320,8 @@ export class Hub {
   }
 
   _handleReportResult(msg) {
-    console.log(`[hub] Report result for ${msg.instanceId}: ${msg.success ? 'OK' : 'FAIL'}`);
+    const outcome = msg.success ? 'OK' : (msg.skipped ? 'SKIP' : 'FAIL');
+    console.log(`[hub] Report result for ${msg.instanceId}: ${outcome}${msg.success ? '' : ` (${msg.error})`}`);
 
     const tracking = readTracking();
     const inst = tracking.instances[msg.instanceId];

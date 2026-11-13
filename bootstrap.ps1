@@ -158,6 +158,21 @@ if (Test-Path (Join-Path $InstallDir 'package-lock.json')) {
   npm install
 }
 if ($LASTEXITCODE -ne 0) { Die "npm install failed (exit $LASTEXITCODE)." }
+# npm reports success before Windows has finished settling node_modules (file locks,
+# AV scanning). Node then reads a half-written package.json and the server dies with
+# ERR_INVALID_PACKAGE_CONFIG; the supervisor's restart loop papers over it, but only
+# after several crash dumps. Wait for the install to actually resolve first.
+Info "Verifying dependencies resolve..."
+$depDeadline = (Get-Date).AddSeconds(20)
+while ($true) {
+  node --input-type=module -e "import('ws').then(() => process.exit(0), () => process.exit(1))" 2>$null
+  if ($LASTEXITCODE -eq 0) { break }
+  if ((Get-Date) -gt $depDeadline) {
+    Write-Warning "Dependencies did not settle within 20s; launching anyway (the supervisor retries)."
+    break
+  }
+  Start-Sleep -Milliseconds 500
+}
 # Let the local launcher .ps1 files run on future (day-2) starts: the default
 # client policy is Restricted (clone files have no Mark-of-the-Web, but be safe).
 Get-ChildItem -Path $InstallDir -Recurse -Include *.ps1, *.psm1, *.psd1 -File | Unblock-File -ErrorAction SilentlyContinue

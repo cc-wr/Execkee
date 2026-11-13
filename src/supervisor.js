@@ -181,21 +181,52 @@ function superviseGateway() {
   let backoff = 1000;
   let startedAt = 0;
   let announcedShared = false;
+  let drainingSince = 0;
+
+  // Is any agentgateway port on this machine taken? `data` answers "is a gateway
+  // serving requests"; `any` answers "may a new one bind". They differ while a
+  // gateway drains: it closes the data port first but holds the admin, stats and
+  // readiness ports for up to its 5s drain deadline. Probing the data port alone
+  // there reads free and the replacement dies on the readiness bind (os error 10048).
+  async function gatewayPorts() {
+    const [data, admin, stats, ready] = await Promise.all([
+      portInUse(config.GATEWAY_PORT),
+      portInUse(config.GATEWAY_ADMIN_PORT),
+      portInUse(config.GATEWAY_STATS_PORT),
+      portInUse(config.GATEWAY_READY_PORT),
+    ]);
+    return { data, any: data || admin || stats || ready };
+  }
 
   async function tick() {
     if (shuttingDown) return;
-    if (await portInUse(config.GATEWAY_PORT)) {
+    const { data, any } = await gatewayPorts();
+    if (data) {
       // Someone already serves this port on this machine — share it, don't spawn a
       // second one. (Our own child also lands here; harmless, it just re-polls.)
       if (!announcedShared && !rec.proc) {
         log('gateway', `already running on ${config.GATEWAY_URL} (another Execkee process on this machine owns it) — sharing it`);
         announcedShared = true;
       }
+      drainingSince = 0;
       gatewayUp = true;
       setTimeout(tick, 15_000);
       return;
     }
+    if (any) {
+      // Admin ports held, data port gone: a gateway is on its way out. Poll fast and
+      // take the slot the moment it lets go. If it never does (a hung process holding
+      // the ports), stop busy-polling and fall back to the slow cadence.
+      if (!drainingSince) {
+        drainingSince = Date.now();
+        log('gateway', 'a previous gateway still holds its admin ports — waiting for it to exit');
+      }
+      gatewayUp = false;
+      setTimeout(tick, Date.now() - drainingSince > 30_000 ? 15_000 : 1000);
+      return;
+    }
     announcedShared = false;
+    drainingSince = 0;
     start();
   }
 
@@ -860,6 +891,32 @@ function startWorkhorse() {
   superviseNode('workhorse', ['src/workhorse/index.js', serverUrl, workhorseId, workhorseName]);
 }
 
+// Terminate a process and everything under it.
+//
+// `taskkill /T /F` walks the tree itself, but it aborts the WHOLE call the moment one
+// descendant refuses ("The operation attempted is not supported." — a job object or an
+// integrity boundary), leaving the root and its siblings alive. So enumerate the tree
+// and kill it leaf-first, tolerating a failure on any single process. taskkill's own
+// error text is swallowed: a partial kill is reported once, by us, with a count.
+function killTree(pid) {
+  let pids = [];
+  try {
+    const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+      `$ids=@(${Number(pid)}); $i=0; while ($i -lt $ids.Count) { ` +
+      `$c = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($ids[$i])" | ` +
+      `Select-Object -ExpandProperty ProcessId; if ($c) { $ids += $c }; $i++ }; $ids -join ','`],
+      { windowsHide: true, timeout: 5000, encoding: 'utf-8' });
+    pids = out.trim().split(',').map(Number).filter(Boolean);
+  } catch { /* enumeration failed — fall back to the root alone */ }
+  if (!pids.length) pids = [Number(pid)];
+  let failed = 0;
+  for (const p of pids.reverse()) { // leaf-first: a parent dying first reparents its children
+    try { execFileSync('taskkill', ['/PID', String(p), '/F'], { windowsHide: true, timeout: 5000, stdio: 'ignore' }); }
+    catch { failed++; }
+  }
+  return { total: pids.length, failed };
+}
+
 function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -872,10 +929,10 @@ function shutdown() {
     }
   }
   if (primaryPid) {
-    try {
-      execFileSync('taskkill', ['/PID', String(primaryPid), '/T', '/F'], { windowsHide: true, timeout: 5000 });
-    } catch (err) {
-      log('main', `taskkill of primary ${primaryPid} failed: ${err.message}`);
+    const r = killTree(primaryPid);
+    if (r.failed) {
+      log('main', `primary ${primaryPid}: stopped ${r.total - r.failed}/${r.total} processes; ` +
+        `${r.failed} refused termination and are now orphaned (kill them by hand if ports stay held)`);
     }
   }
   setTimeout(() => process.exit(0), 1000);

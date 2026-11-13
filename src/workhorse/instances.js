@@ -237,7 +237,7 @@ export class InstanceManager {
     const inst = tracking.instances[instanceId];
     if (!inst) return { success: false, error: 'Instance not found' };
     if (inst.visibility === VISIBILITY.FOREGROUND) {
-      return { success: false, error: 'Instance is foregrounded — skip' };
+      return { success: false, error: 'Instance is foregrounded — skip', skipped: true };
     }
     // KI-6: advance the stored sessionId to the LIVE session BEFORE choosing probe vs
     // fork. BOTH paths must do this — otherwise the Windows probe path (which returns

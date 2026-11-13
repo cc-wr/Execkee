@@ -142,6 +142,15 @@ export default Object.freeze({
   GATEWAY_PORT: Number(process.env.EXECKEE_GATEWAY_PORT) || 4000,
   GATEWAY_URL: `http://127.0.0.1:${Number(process.env.EXECKEE_GATEWAY_PORT) || 4000}`,
   GATEWAY_DIR: join(DATA_DIR, 'agentgateway'),
+  // agentgateway binds three more ports than the data port (admin UI, stats,
+  // readiness) and they are not configurable in v1.5.0. A second instance dies on
+  // the FIRST collision, which is one of these — and a gateway that is draining
+  // releases the data port before them, so a probe of the data port alone reads an
+  // exiting gateway as "gone" and the replacement crashes on bind. The singleton
+  // check covers all four.
+  GATEWAY_ADMIN_PORT: 15000,
+  GATEWAY_STATS_PORT: 15020,
+  GATEWAY_READY_PORT: 15021,
 
   WINDOW_TITLE_PREFIX: 'Execkee',
 });
