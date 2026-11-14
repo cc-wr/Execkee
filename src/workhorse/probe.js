@@ -1,4 +1,6 @@
 import process from 'node:process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import config from '../common/config.js';
 
 // "Probe report" — generate a status report by driving the LIVE instance instead
@@ -197,6 +199,33 @@ function splitItems(s) {
     .filter(x => x && !/^(none|n\/?a|nothing|no items?)\.?$/i.test(x));
 }
 
+// H1: dump the frame the settle loop gave up on, so the cause is inspectable instead
+// of inferred. One file per instance, OVERWRITTEN each time — a diagnostic must not
+// grow without bound. The frame is the window's own visible text; it goes to the logs
+// directory alongside everything else already written from these sessions.
+function dumpSettleFailure(inst, frame, tally) {
+  try {
+    const dir = join(config.DATA_DIR, 'logs', 'probe-frames');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const rows = String(frame || '').split(/\r?\n/);
+    const widest = rows.reduce((m, l) => Math.max(m, l.length), 0);
+    const head = [
+      `instance: ${inst.id} (${inst.name})`,
+      `pid: ${inst.pid}`,
+      `at: ${new Date().toISOString()}`,
+      `tally: ${JSON.stringify(tally)}`,
+      `frame: ${rows.length} rows, widest line ${widest} chars`,
+      `isBusy: ${isBusy(frame)}`,
+      `looksReady: ${looksReady(frame)}`,
+      `isInteractivePrompt: ${isInteractivePrompt(frame)}`,
+      `userComposing: ${userComposing(frame)}`,
+      '--- raw frame below ---',
+      '',
+    ].join('\n');
+    writeFileSync(join(dir, `${inst.id}.txt`), head + String(frame || ''), 'utf-8');
+  } catch { /* diagnostics must never break a probe */ }
+}
+
 // Drive `inst`'s live window to produce a report. Returns one of:
 //   { success:true, report, marker }            — got a fresh report
 //   { success:false, unchanged:true }            — idle + unchanged since lastMarker
@@ -227,13 +256,31 @@ export async function probeReport(inst, { lastMarker } = {}) {
   //     mid-render. Two identical idle frames => stable idle.
   let settled = null;
   let prevNorm = null;
+  // H1: the settle loop can fail two ways that need opposite fixes — the frame never
+  // looked idle, or it looked idle but never held still. 5152 fallbacks were logged
+  // with one undifferentiated message, so neither could be told from the other. Count
+  // both, and keep the last frame to dump if it fails.
+  const tally = { samples: 0, idle: 0, busy: 0, notReady: 0, prompt: 0, composing: 0, unstable: 0 };
+  let lastFrame = '';
   for (let i = 0; i < config.PROBE_SETTLE_SAMPLES; i++) {
     await sleep(config.PROBE_IDLE_SETTLE_MS);
     const cur = readFrame(pid);
     if (cur.startsWith('ATTACH_FAIL')) return { success: false, fallback: true, error: 'console detached mid-probe' };
-    const idleNow = !isBusy(cur) && looksReady(cur) && !isInteractivePrompt(cur) && !userComposing(cur);
+    lastFrame = cur;
+    tally.samples++;
+    const busy = isBusy(cur);
+    const ready = looksReady(cur);
+    const atPrompt = isInteractivePrompt(cur);
+    const composing = userComposing(cur);
+    if (busy) tally.busy++;
+    if (!ready) tally.notReady++;
+    if (atPrompt) tally.prompt++;
+    if (composing) tally.composing++;
+    const idleNow = !busy && ready && !atPrompt && !composing;
+    if (idleNow) tally.idle++;
     const norm = idleStableNorm(cur);
     if (idleNow && prevNorm !== null && norm === prevNorm) { settled = cur; break; }
+    if (idleNow && prevNorm !== null) tally.unstable++; // idle, but the frame moved
     prevNorm = idleNow ? norm : null; // reset the anchor whenever it isn't idle
   }
   if (!settled) {
@@ -244,7 +291,18 @@ export async function probeReport(inst, { lastMarker } = {}) {
     if (isBusy(cur)) return { success: false, skipped: true, reason: 'instance is mid-inference' };
     if (isInteractivePrompt(cur)) return { success: false, skipped: true, reason: 'instance is at an interactive prompt (permission/trust)' };
     if (userComposing(cur)) return { success: false, skipped: true, reason: 'user is composing input' };
-    return { success: false, fallback: true, error: 'TUI never reached a stable idle state' };
+    dumpSettleFailure(inst, cur || lastFrame, tally);
+    const why = tally.idle === 0
+      ? (tally.notReady === tally.samples ? 'no TUI markers in any frame' : 'never idle')
+      : 'idle but never stable';
+    return {
+      success: false,
+      fallback: true,
+      noStableIdle: true,
+      error: `TUI never reached a stable idle state (${why}; ` +
+        `idle ${tally.idle}/${tally.samples}, notReady ${tally.notReady}, busy ${tally.busy}, ` +
+        `prompt ${tally.prompt}, composing ${tally.composing}, unstable ${tally.unstable})`,
+    };
   }
   if (lastMarker && !hasNewContentAfter(settled, lastMarker)) return { success: false, unchanged: true };
 

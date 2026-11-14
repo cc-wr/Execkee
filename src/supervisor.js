@@ -14,8 +14,9 @@
 
 import { spawn, execFileSync } from 'child_process';
 import { portInUse } from './common/net.js';
+import { writePrimaryInfo, clearPrimaryInfo } from './common/primary.js';
 import { hostname } from 'os';
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, openSync, closeSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import config from './common/config.js';
@@ -182,6 +183,7 @@ function superviseGateway() {
   let startedAt = 0;
   let announcedShared = false;
   let drainingSince = 0;
+  let holdsLock = false;
 
   // Is any agentgateway port on this machine taken? `data` answers "is a gateway
   // serving requests"; `any` answers "may a new one bind". They differ while a
@@ -227,7 +229,43 @@ function superviseGateway() {
     }
     announcedShared = false;
     drainingSince = 0;
+    // Port probes cannot settle a SIMULTANEOUS start: the controller and a co-resident
+    // workhorse both read empty ports in the same millisecond, both spawn, and one dies
+    // on bind. That is survivable (the loser shares) but it writes an alarming
+    // "os error 10048" to the log every time. An exclusive-create lock makes the race
+    // decidable without the crash: only the winner spawns, the loser waits.
+    if (!acquireGatewayLock()) {
+      setTimeout(tick, 1000);
+      return;
+    }
     start();
+  }
+
+  // Exclusive-create (O_EXCL) is atomic, so exactly one racer wins. A lock left by a
+  // process that died is reclaimed — otherwise a crash would disable the gateway until
+  // someone deleted the file by hand.
+  function acquireGatewayLock() {
+    if (holdsLock) return true;
+    const f = config.GATEWAY_LOCK_FILE;
+    try {
+      const fd = openSync(f, 'wx');
+      try { writeFileSync(fd, String(process.pid), 'utf-8'); } finally { closeSync(fd); }
+      holdsLock = true;
+      return true;
+    } catch (err) {
+      if (err.code !== 'EEXIST') return true; // can't lock (odd FS) — don't block the gateway
+      let owner = 0;
+      try { owner = parseInt(readFileSync(f, 'utf-8').trim(), 10) || 0; } catch {}
+      if (owner && owner !== process.pid && pidAlive(owner)) return false;
+      try { unlinkSync(f); } catch {}
+      return false; // re-probe next tick; the reclaimed lock is taken then
+    }
+  }
+
+  function releaseGatewayLock() {
+    if (!holdsLock) return;
+    holdsLock = false;
+    try { unlinkSync(config.GATEWAY_LOCK_FILE); } catch {}
   }
 
   function start() {
@@ -243,6 +281,7 @@ function superviseGateway() {
     proc.on('exit', (code) => {
       rec.proc = null;
       gatewayUp = false;
+      releaseGatewayLock();
       if (shuttingDown) return;
       if (Date.now() - startedAt > 300_000) backoff = 1000; // stable ≥5 min → reset
       log('gateway', `exited (code ${code}); re-checking in ${backoff}ms`);
@@ -349,8 +388,105 @@ function refreshPrimarySession() {
   const s = newestLifeTasksSession();
   if (s && s !== readPrimarySessionId()) {
     writePrimarySessionId(s);
+    writePrimaryInfo({ pid: primaryPid, sessionId: s, cwd: config.LIFE_TASKS_DIR });
     log('primary', `tracked live primary session ${s.slice(0, 8)}`);
   }
+}
+
+// J2: the primary's window, as Windows sees it. Nothing recorded this before, so when
+// the window went missing on 2026-11-13 there was no way to tell a hidden window from a
+// collapsed or an off-screen one.
+//
+// The handle is captured ONCE, shortly after launch while the window is still visible,
+// and then reused. Re-resolving it per check does NOT work: a hidden window reports
+// Process.MainWindowHandle = 0 (measured), so a self-resolving check goes blind at
+// exactly the moment the fault appears. A handle stays valid for the window's lifetime.
+// It is also published in primary.json, which is what lets the workhorse refuse to hide
+// this particular window.
+let primaryHwnd = null;
+let lastWindowState = '';
+
+const WIN32_MEMBERS = [
+  '[DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);',
+  '[DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);',
+  '[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);',
+  '[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);',
+  '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);',
+  '[DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int t, bool r);',
+  '[DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);',
+  'public struct RECT { public int Left, Top, Right, Bottom; }',
+].join(' ');
+
+function runPs(script, timeout = 10_000) {
+  return execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
+    { encoding: 'utf-8', windowsHide: true, timeout }).trim();
+}
+
+function capturePrimaryHwnd() {
+  if (!primaryPid) return;
+  try {
+    const out = runPs(`$p = Get-Process -Id ${primaryPid} -ErrorAction SilentlyContinue
+if (-not $p) { Write-Output '0'; exit }
+$p.Refresh()
+Write-Output ([int64]$p.MainWindowHandle)`);
+    const h = parseInt(out, 10) || 0;
+    if (h) {
+      primaryHwnd = h;
+      writePrimaryInfo({ pid: primaryPid, sessionId: readPrimarySessionId(), cwd: config.LIFE_TASKS_DIR, hwnd: h });
+      log('primary', `window handle ${h} captured`);
+    } else {
+      log('primary', 'no window handle for the primary yet (hidden windows report 0)');
+    }
+  } catch (err) { log('primary', `window handle capture failed: ${err.message}`); }
+  checkPrimaryWindow();
+}
+
+// Report the window's state, and repair the two states the operator cannot recover from
+// by hand: hidden (nothing to click) and collapsed (too small to use). A minimized
+// window is left alone — that is a user choice. Logs only on change.
+function checkPrimaryWindow() {
+  if (!primaryHwnd) return;
+  const script = `$ErrorActionPreference = 'Stop'
+Add-Type -Namespace EK -Name Win -MemberDefinition '${WIN32_MEMBERS}' | Out-Null
+$h = [IntPtr][int64]${primaryHwnd}
+if (-not [EK.Win]::IsWindow($h)) { Write-Output 'window-gone'; exit }
+$vis = [EK.Win]::IsWindowVisible($h)
+$ico = [EK.Win]::IsIconic($h)
+$r = New-Object EK.Win+RECT
+[void][EK.Win]::GetWindowRect($h, [ref]$r)
+$w = $r.Right - $r.Left
+$t = $r.Bottom - $r.Top
+$fixed = ''
+if (-not $vis) {
+  # Re-show, then VERIFY. Never report a repair that did not take: SW_SHOW is the
+  # right verb for a window hidden with SW_HIDE, but fall back rather than claim
+  # success, and let the log say 'STILL-HIDDEN' if none of them work.
+  foreach ($verb in 5, 9, 1) {
+    [void][EK.Win]::ShowWindow($h, $verb)
+    Start-Sleep -Milliseconds 150
+    $vis = [EK.Win]::IsWindowVisible($h)
+    if ($vis) { $fixed += "RESHOWN($verb) "; break }
+  }
+  if (-not $vis) { $fixed += 'STILL-HIDDEN ' }
+}
+if (-not $ico -and ($w -lt 500 -or $t -lt 400)) {
+  $sw = [EK.Win]::GetSystemMetrics(0)
+  $sh = [EK.Win]::GetSystemMetrics(1)
+  $nw = [Math]::Min(1200, $sw)
+  $nh = [Math]::Min(800, $sh)
+  [void][EK.Win]::MoveWindow($h, [int](($sw - $nw) / 2), [int](($sh - $nh) / 2), $nw, $nh, $true)
+  $fixed += 'RESIZED '
+  $w = $nw
+  $t = $nh
+}
+Write-Output (("visible=" + $vis + " minimized=" + $ico + " size=" + $w + "x" + $t + " " + $fixed).Trim())`;
+  try {
+    const out = runPs(script);
+    if (out && out !== lastWindowState) {
+      lastWindowState = out;
+      log('primary', `window: ${out}`);
+    }
+  } catch (err) { log('primary', `window check failed: ${err.message}`); }
 }
 
 function launchClaude(cwd, argLine, extraEnv) {
@@ -409,7 +545,13 @@ function launchPrimaryWindow() {
   const resumeId = resumablePrimarySession();
   if (resumeId) {
     const pid = launchClaude(cwd, `--dangerously-skip-permissions --resume ${resumeId} --settings "${settings}"${rc}`, env);
-    if (pid) { log('primary', `launched (resumed ${resumeId.slice(0, 8)})${rc ? ' [remote-control]' : ''}${gwTag} pid=${pid}`); return pid; }
+    if (pid) {
+      // Publish it BEFORE anything can adopt it: the workhorse matches `findsession`
+      // on a session id anywhere in a command line, and ours carries `--resume <id>`.
+      writePrimaryInfo({ pid, sessionId: resumeId, cwd });
+      log('primary', `launched (resumed ${resumeId.slice(0, 8)})${rc ? ' [remote-control]' : ''}${gwTag} pid=${pid}`);
+      return pid;
+    }
     log('primary', 'resume launch produced no pid — falling back to a fresh primary');
   }
 
@@ -417,6 +559,9 @@ function launchPrimaryWindow() {
   const before = new Set(listLocalSessions().map(s => s.sessionId));
   const pid = launchClaude(cwd, `--dangerously-skip-permissions --settings "${settings}" "${PRIMARY_SEED}"`, env);
   if (pid) schedulePrimaryCapture(before);
+  // A fresh primary has no session id yet; refreshPrimarySession() fills it in once
+  // the transcript appears. The pid alone already protects the window.
+  writePrimaryInfo({ pid, sessionId: null, cwd });
   log('primary', `launched fresh pid=${pid}`);
   return pid;
 }
@@ -432,6 +577,7 @@ async function startPrimary() {
   }
   primaryPid = launchPrimaryWindow();
   log('primary', `launched pid=${primaryPid} in ${config.LIFE_TASKS_DIR}`);
+  setTimeout(capturePrimaryHwnd, 8000); // MainWindowHandle lags the spawn
   primaryInterval = setInterval(() => {
     if (shuttingDown) return;
     if (pidAlive(primaryPid)) return;
@@ -448,6 +594,9 @@ async function startPrimary() {
     primaryRelaunches.push(now);
     log('primary', 'primary surface exited — relaunching');
     primaryPid = launchPrimaryWindow();
+    primaryHwnd = null; // the old handle died with the old window
+    lastWindowState = '';
+    setTimeout(capturePrimaryHwnd, 8000);
   }, 5000);
   // KI-6: continuously track the live primary session so resume-on-restart never
   // reverts to a stale snapshot (or a fresh seed). Also tail the primary's
@@ -461,6 +610,7 @@ async function startPrimary() {
       const sid = newestLifeTasksSession();
       if (sid) tailPrimaryChat(sid, getSessionJsonlPath(sid), primaryChatState);
     } catch (err) { log('primary', `chat-log tail error: ${err.message}`); }
+    checkPrimaryWindow();
   }, 15_000);
 }
 
@@ -928,6 +1078,7 @@ function shutdown() {
       try { rec.proc.kill(); } catch {}
     }
   }
+  clearPrimaryInfo();
   if (primaryPid) {
     const r = killTree(primaryPid);
     if (r.failed) {

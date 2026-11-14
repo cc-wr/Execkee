@@ -26,7 +26,16 @@ dashboard.start();
 
 let cycleTimer = null;
 
+// Report timeouts are now minutes rather than a flat 30s (see Hub.sendCommand), so a
+// cycle over many slow instances can outlast the 30-minute interval. Overlapping cycles
+// would probe the same windows twice at once, so a late cycle is skipped, not queued.
+let cycleRunning = false;
 async function runCycle() {
+  if (cycleRunning) {
+    console.log('[server] Previous cycle still running — skipping this one');
+    return;
+  }
+  cycleRunning = true;
   console.log(`[server] Running 30-minute cycle at ${new Date().toISOString()}`);
   try {
     const { runCoworkCycle } = await import('../cowork.js');
@@ -34,6 +43,8 @@ async function runCycle() {
     dashboard.pushUpdate();
   } catch (err) {
     console.error('[server] Cycle error:', err.message);
+  } finally {
+    cycleRunning = false;
   }
 }
 

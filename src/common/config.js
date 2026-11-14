@@ -148,6 +148,12 @@ export default Object.freeze({
   // releases the data port before them, so a probe of the data port alone reads an
   // exiting gateway as "gone" and the replacement crashes on bind. The singleton
   // check covers all four.
+  // Published by the supervisor so the workhorse (a separate process, possibly on
+  // another machine) can recognise the controller's own primary window and refuse to
+  // adopt, probe or hide it. Absent => no primary on this machine; the guards no-op.
+  PRIMARY_FILE: join(DATA_DIR, 'primary.json'),
+  GATEWAY_LOCK_FILE: join(DATA_DIR, 'agentgateway', 'owner.lock'),
+
   GATEWAY_ADMIN_PORT: 15000,
   GATEWAY_STATS_PORT: 15020,
   GATEWAY_READY_PORT: 15021,

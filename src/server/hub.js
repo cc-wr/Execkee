@@ -131,16 +131,24 @@ export class Hub {
       this.pendingCallbacks.set(parsed.requestId, resolve);
       // These commands answer with a dedicated *_RESULT message; the ACK must not
       // resolve them (see the ACK handler).
-      if (command === CMD.REPORT || command === CMD.LIST_SESSIONS) {
+      const slow = command === CMD.REPORT || command === CMD.LIST_SESSIONS;
+      if (slow) {
         this.awaitingResult.add(parsed.requestId);
       }
+      // A report is minutes of work, not seconds: the probe spends up to 18s just
+      // settling the TUI, then waits on a model turn. At a flat 30s the caller gave up
+      // while the workhorse was still working, fell back to the previous report, and
+      // the finished one landed too late to be used — so every slow instance ran a
+      // whole cycle behind, permanently. REPORT_TIMEOUT_MS existed for this and was
+      // never wired to this call site.
+      const timeoutMs = slow ? config.REPORT_TIMEOUT_MS : 30_000;
       setTimeout(() => {
         if (this.pendingCallbacks.has(parsed.requestId)) {
           this.pendingCallbacks.delete(parsed.requestId);
           this.awaitingResult.delete(parsed.requestId);
-          resolve({ success: false, error: 'Timeout' });
+          resolve({ success: false, error: `Timeout after ${Math.round(timeoutMs / 1000)}s` });
         }
-      }, 30_000);
+      }, timeoutMs);
     });
   }
 

@@ -3,6 +3,7 @@ import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import config from '../common/config.js';
+import { readPrimaryInfo } from '../common/primary.js';
 
 const EXECKEE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK_PATH = join(EXECKEE_ROOT, 'src', 'instance-hook.js');
@@ -312,6 +313,15 @@ export function isProcessAlive(pid) {
 
 export function hideWindow(windowHandle) {
   if (!windowHandle) return false;
+  // Last line of defence. Whatever route gets here — adoption, crash recovery, an
+  // explicit `hide` — the controller's own window is never a legitimate target. On
+  // 2026-11-13 it was hidden while its process kept running, leaving no console to
+  // operate the fleet from and nothing on screen to click.
+  const primary = readPrimaryInfo();
+  if (primary && primary.hwnd && String(primary.hwnd) === String(windowHandle)) {
+    console.warn(`[adapter-win] refused to hide the controller's primary window (${windowHandle})`);
+    return false;
+  }
   return runHelper({ Action: 'hide', Handle: windowHandle }) === 'ok';
 }
 

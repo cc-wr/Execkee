@@ -3,6 +3,7 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { claudeRun } from '../common/exec-async.js';
 import config from '../common/config.js';
+import { isPrimarySession, primarySlug } from '../common/primary.js';
 
 const REPORT_PROMPT = [
   'You are producing a status report for this Claude Code conversation.',
@@ -64,8 +65,14 @@ export function listLocalSessions() {
   const projectsDir = join(homedir(), '.claude', 'projects');
   if (!existsSync(projectsDir)) return [];
   const out = [];
+  // The controller's own primary lives in its own project dir. Adopting it points an
+  // instance at the operator's console, and the instance then hides it. Hide the whole
+  // slug, not just the current session id: the primary forks/continues into new ids in
+  // that same directory, and any of them would reach the same window.
+  const skipSlug = primarySlug();
   try {
     for (const slug of readdirSync(projectsDir)) {
+      if (skipSlug && slug === skipSlug) continue;
       const slugDir = join(projectsDir, slug);
       let entries;
       try {
@@ -102,6 +109,10 @@ export function newestSessionInSlugOf(sessionId, exclude = new Set()) {
       // don't grab a sibling's conversation in a shared project dir). The instance's
       // own id is always allowed.
       if (id !== sessionId && exclude.has(id)) continue;
+      // Nor the controller's primary. This is how the collision happened: an instance
+      // sharing the primary's project dir drifted onto the primary's live session,
+      // which then resolved to the primary's window.
+      if (id !== sessionId && isPrimarySession(id)) continue;
       const m = statSync(join(dir, f)).mtimeMs;
       if (m > bestM) { bestM = m; best = id; }
     }

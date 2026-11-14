@@ -6,6 +6,7 @@ import * as adapter from './adapter.js';
 import * as probe from './probe.js';
 import { portInUse } from '../common/net.js';
 import config from '../common/config.js';
+import { isPrimaryPid, isPrimarySession } from '../common/primary.js';
 
 // Every mutation of the local tracking store goes through mutateTracking (a
 // cross-process-locked read-modify-write), because the per-instance hooks run in
@@ -145,6 +146,12 @@ export class InstanceManager {
     }
     sessionId = resolvedId;
 
+    // The controller's primary is not an instance. Adopting it attaches a record to the
+    // operator's own console and then applies the adopted-hidden default to it.
+    if (isPrimarySession(sessionId)) {
+      return { success: false, error: "That is the controller's own primary session — it cannot be managed as an instance" };
+    }
+
     // `claude --resume` is project-scoped: the instance MUST run from the
     // session's own working directory, not wherever the manage command was
     // issued. Derive it from the transcript; fall back to the supplied path.
@@ -183,7 +190,14 @@ export class InstanceManager {
     // tracking loss attaches to the live window instead of piling up windows. Its handle
     // is null when the window is hidden (monitorable by pid; hide/show works again after
     // a relaunch). Falls back to a normal launch when nothing is already running it.
-    const existing = adapter.findSessionWindow(sessionId);
+    // `findsession` matches a session id ANYWHERE in a command line, and the primary's
+    // own line carries `--resume <id>`. A match on the primary's pid must be discarded,
+    // or the record takes the primary's pid and window handle as its own.
+    const found = adapter.findSessionWindow(sessionId);
+    const existing = found && isPrimaryPid(found.pid) ? null : found;
+    if (found && !existing) {
+      console.warn(`[instances] ignored a window match on the controller's primary (pid=${found.pid}) for session ${sessionId.slice(0, 8)}`);
+    }
     let reused = false;
     if (existing && adapter.isProcessAlive(existing.pid)) {
       record.pid = existing.pid;
@@ -224,6 +238,9 @@ export class InstanceManager {
   hide(instanceId) {
     const inst = readTracking().instances[instanceId];
     if (!inst) return { success: false, error: 'Instance not found' };
+    if (isPrimaryPid(inst.pid)) {
+      return { success: false, error: "That record points at the controller's primary window — refusing to hide it" };
+    }
 
     const hidden = adapter.hideWindow(inst.windowHandle); // adapter call outside the lock
     if (hidden) {
@@ -236,6 +253,11 @@ export class InstanceManager {
     const tracking = readTracking();
     const inst = tracking.instances[instanceId];
     if (!inst) return { success: false, error: 'Instance not found' };
+    if (isPrimaryPid(inst.pid)) {
+      // Probing injects a prompt into the window. The primary is the operator's own
+      // console; it must never be typed into by the fleet it supervises.
+      return { success: false, error: "That record points at the controller's primary — not probing it", skipped: true };
+    }
     if (inst.visibility === VISIBILITY.FOREGROUND) {
       return { success: false, error: 'Instance is foregrounded — skip', skipped: true };
     }
@@ -271,10 +293,25 @@ export class InstanceManager {
       // injecting and use the fork — but re-test once the rolling refusal window has
       // expired, so a false positive (or a since-changed conversation) self-heals.
       if (inst.probeDisabled) {
-        const since = inst.probeRefusedSince ? Date.parse(inst.probeRefusedSince) : 0;
+        // Two causes share this one flag (refusal, and never reaching stable idle), so
+        // the re-test window runs from whichever tally was touched last. Keyed on the
+        // refusal anchor alone, a settle-failure disable had no anchor to expire.
+        const since = Math.max(
+          inst.probeRefusedSince ? Date.parse(inst.probeRefusedSince) : 0,
+          inst.probeIdleFailSince ? Date.parse(inst.probeIdleFailSince) : 0,
+        );
         if (since && (Date.now() - since) > config.PROBE_REFUSE_WINDOW_MS) {
-          console.log(`[instances] ${instanceId} (${inst.name}) probe-refusal window expired — re-enabling live-probe`);
-          mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { probeDisabled: false, probeRefusedCount: 0, probeRefusedSince: null }); });
+          console.log(`[instances] ${instanceId} (${inst.name}) probe-disable window expired — re-enabling live-probe`);
+          mutateTracking(t => {
+            if (!t.instances[instanceId]) return false;
+            updateInstance(t, instanceId, {
+              probeDisabled: false,
+              probeRefusedCount: 0,
+              probeRefusedSince: null,
+              probeIdleFailCount: 0,
+              probeIdleFailSince: null,
+            });
+          });
           inst.probeDisabled = false;
         }
       }
@@ -368,6 +405,8 @@ export class InstanceManager {
             // refusals don't accumulate toward a disable across unrelated good probes.
             probeRefusedCount: 0,
             probeRefusedSince: null,
+            probeIdleFailCount: 0,
+            probeIdleFailSince: null,
           });
         });
         console.log(`[instances] ${instanceId} (${inst.name}) probe report ok`);
@@ -396,6 +435,39 @@ export class InstanceManager {
         });
         console.warn(`[instances] ${instanceId} (${inst.name}) refused the probe (${count}/${config.PROBE_REFUSE_LIMIT})${disabled ? ' — disabling live-probe; using fork reports' : ''}`);
         return null; // report() falls through to the fork path
+      }
+      if (result.noStableIdle) {
+        // H2: the settle loop costs PROBE_SETTLE_SAMPLES * PROBE_IDLE_SETTLE_MS (18s by
+        // default) and this failure has historically repeated every cycle for weeks on
+        // the same instances — 5152 times in the log. Tally it the way refusals are
+        // tallied and stop paying for it, but keep the weekly re-test so a transient
+        // cause self-heals. Report quality is unaffected: these instances were already
+        // being served by the fork.
+        let count = 1, disabled = false;
+        mutateTracking(t => {
+          const i = t.instances[instanceId];
+          if (!i) return false;
+          const since = i.probeIdleFailSince ? Date.parse(i.probeIdleFailSince) : 0;
+          const fresh = !since || (Date.now() - since) > config.PROBE_REFUSE_WINDOW_MS;
+          count = fresh ? 1 : (i.probeIdleFailCount || 0) + 1;
+          disabled = count >= config.PROBE_REFUSE_LIMIT;
+          // Keep a disable the REFUSAL tally still justifies; otherwise this cause owns
+          // the flag. Inheriting it unconditionally made it permanent: a restarted
+          // tally would re-disable on its first strike.
+          const rSince = i.probeRefusedSince ? Date.parse(i.probeRefusedSince) : 0;
+          const refusalStillHolds = !!rSince
+            && (Date.now() - rSince) <= config.PROBE_REFUSE_WINDOW_MS
+            && (i.probeRefusedCount || 0) >= config.PROBE_REFUSE_LIMIT;
+          updateInstance(t, instanceId, {
+            probeIdleFailCount: count,
+            probeIdleFailSince: fresh ? new Date().toISOString() : i.probeIdleFailSince,
+            probeDisabled: disabled || refusalStillHolds,
+          });
+        });
+        console.warn(`[instances] ${instanceId} (${inst.name}) ${result.error} (${count}/${config.PROBE_REFUSE_LIMIT})` +
+          (disabled ? ' — disabling live-probe; using fork reports' : '') +
+          ` — frame dumped to logs/probe-frames/${instanceId}.txt`);
+        return null; // fork path
       }
       if (result.unchanged) return { success: false, error: 'No changes since last probe — skip', skipped: true };
       if (result.skipped) return { success: false, error: `Probe skipped (${result.reason})`, skipped: true };
