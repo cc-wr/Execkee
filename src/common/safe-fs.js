@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, readdirSync, unlinkSync, statSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, readdirSync, unlinkSync, statSync, openSync, fsyncSync, closeSync } from 'fs';
 import { dirname, basename, join } from 'path';
 
 // Robust JSON persistence shared by the life-tasks store (store.js) and the instance
@@ -19,9 +19,23 @@ function sleepSync(ms) {
 // concurrent reader then sees "missing" and can persist an empty default over real data
 // (the instance-tracking / tasks wipe). If the rename keeps failing we throw loudly
 // rather than destroy or half-write the target.
+//
+// The temp file is FLUSHED TO DISK before the rename. Rename is a metadata operation
+// and NTFS journals it, but file data sits in the cache until the lazy writer gets to
+// it. On a sudden power loss the rename therefore survives and the data does not: the
+// target comes back at the right length and entirely NUL. This machine loses power
+// without warning (14 times in 90 days), and each time it zeroed whatever was being
+// written — tracking.json on 2026-08-18, 09-09, 11-01 and 11-13. With the flush, the
+// target is always either the complete old content or the complete new content.
 export function atomicWriteJson(path, data) {
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+  const fd = openSync(tmp, 'w');
+  try {
+    writeFileSync(fd, JSON.stringify(data, null, 2), 'utf-8');
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   let lastErr;
   for (let i = 0; i < 12; i++) {
     try { renameSync(tmp, path); return; }

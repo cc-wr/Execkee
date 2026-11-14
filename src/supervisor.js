@@ -15,6 +15,7 @@
 import { spawn, execFileSync } from 'child_process';
 import { portInUse } from './common/net.js';
 import { writePrimaryInfo, clearPrimaryInfo } from './common/primary.js';
+import { atomicWriteJson } from './common/safe-fs.js';
 import { hostname } from 'os';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, openSync, closeSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
@@ -335,7 +336,9 @@ function ensurePrimaryFolderTrusted() {
   if (obj.projects[key].hasTrustDialogAccepted === true) return; // already trusted; no write
   obj.projects[key].hasTrustDialogAccepted = true;
   try {
-    writeFileSync(claudeJson, JSON.stringify(obj, null, 2), 'utf-8');
+    // ~/.claude.json is Claude Code's own config for EVERY project, not ours. A plain
+    // write that a power loss catches would zero it; go through the flushed atomic path.
+    atomicWriteJson(claudeJson, obj);
     log('primary', `pre-trusted folder for primary: ${key}`);
   } catch (err) {
     log('primary', `could not pre-trust folder (${err.message}); the primary may prompt once`);
@@ -351,7 +354,10 @@ function readPrimarySessionId() {
 }
 
 function writePrimarySessionId(sessionId) {
-  try { writeFileSync(PRIMARY_SESSION_FILE, JSON.stringify({ sessionId, updatedAt: new Date().toISOString() }, null, 2), 'utf-8'); } catch {}
+  // Losing this file costs the primary its conversation: the next start seeds a fresh
+  // one instead of resuming. Written every time the live session moves, so it is
+  // exposed to a power loss often.
+  try { atomicWriteJson(PRIMARY_SESSION_FILE, { sessionId, updatedAt: new Date().toISOString() }); } catch {}
 }
 
 const _normPath = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();

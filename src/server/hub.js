@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { MSG, CMD, DESIRED_STATE, parseMessage, makeMessage, maxDesiredState } from '../common/protocol.js';
 import { readTracking, writeTracking, registerWorkhorse, getInstancesForWorkhorse, createInstanceRecord } from '../common/tracking.js';
 import { writeState } from '../common/store.js';
+import { atomicWriteJson } from '../common/safe-fs.js';
 import { hashOf } from '../common/settings-sync.js';
 import config from '../common/config.js';
 
@@ -197,7 +198,7 @@ export class Hub {
 
   _saveCanonical() {
     try {
-      writeFileSync(config.SETTINGS_SYNC_FILE, JSON.stringify(this.canonicalSettings, null, 2), 'utf-8');
+      atomicWriteJson(config.SETTINGS_SYNC_FILE, this.canonicalSettings);
     } catch (err) { console.error('[hub] save canonical settings failed:', err.message); }
   }
 

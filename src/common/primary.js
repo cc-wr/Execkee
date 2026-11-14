@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
 import config from './config.js';
+import { atomicWriteJson } from './safe-fs.js';
 
 // The controller's primary window is the operator's own console. It is NOT a managed
 // instance, and nothing in instance management may adopt it, probe it, or hide it.
@@ -24,13 +25,13 @@ export function writePrimaryInfo({ pid, sessionId, cwd, hwnd }) {
   try {
     const prev = readPrimaryInfo() || {};
     const samePid = prev.pid && Number(prev.pid) === Number(pid);
-    writeFileSync(config.PRIMARY_FILE, JSON.stringify({
+    atomicWriteJson(config.PRIMARY_FILE, {
       pid: pid || null,
       sessionId: sessionId || prev.sessionId || null,
       cwd: cwd || prev.cwd || null,
       hwnd: hwnd || (samePid ? prev.hwnd : null) || null,
       updatedAt: new Date().toISOString(),
-    }, null, 2), 'utf-8');
+    });
   } catch { /* advisory only — never fail a launch over it */ }
 }
 
