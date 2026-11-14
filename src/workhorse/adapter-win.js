@@ -172,7 +172,15 @@ switch ($Action) {
             if ([ExeckeeWin32]::IsIconic($hwnd)) {
                 [ExeckeeWin32]::ShowWindow($hwnd, [ExeckeeWin32]::SW_RESTORE) | Out-Null
             } else {
-                [ExeckeeWin32]::ShowWindow($hwnd, [ExeckeeWin32]::SW_SHOW) | Out-Null
+                # This helper process is itself started hidden, and Windows applies the
+                # launcher's show state to a process's FIRST ShowWindow(SW_SHOW) call:
+                # the call "succeeds" and the target stays hidden (measured). So verify,
+                # and repeat. A second SW_SHOW is honoured and keeps a maximized window
+                # maximized; SW_RESTORE is the last resort because it un-maximizes.
+                foreach ($verb in [ExeckeeWin32]::SW_SHOW, [ExeckeeWin32]::SW_SHOW, [ExeckeeWin32]::SW_RESTORE) {
+                    [ExeckeeWin32]::ShowWindow($hwnd, $verb) | Out-Null
+                    if ([ExeckeeWin32]::IsWindowVisible($hwnd)) { break }
+                }
             }
             # Size floor. Managed windows have been found collapsed to 24x55 — border
             # and title bar only — with that size persisted in the restore rect, so
