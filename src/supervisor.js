@@ -32,7 +32,7 @@ const CLI = join(ROOT, 'src', 'cli.js');
 const PRIMARY_SETTINGS = join(config.DATA_DIR, 'primary-settings.json');
 const PRIMARY_SESSION_FILE = join(config.DATA_DIR, 'primary-session.json');
 const PRIMARY_SEED = 'Give me a brief status of Execkee right now (managed instances and the top dashboard sentence), then stand by for my instructions.';
-const BRIEF_VERSION = 21;
+const BRIEF_VERSION = 22;
 const BRIEF_MARKER = `execkee-brief v${BRIEF_VERSION}`;
 
 const mode = process.argv[2] || 'controller';
@@ -417,7 +417,6 @@ const WIN32_MEMBERS = [
   '[DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);',
   '[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);',
   '[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);',
-  '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);',
   '[DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int t, bool r);',
   '[DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);',
   'public struct RECT { public int Left, Top, Right, Bottom; }',
@@ -447,9 +446,12 @@ Write-Output ([int64]$p.MainWindowHandle)`);
   checkPrimaryWindow();
 }
 
-// Report the window's state, and repair the two states the operator cannot recover from
-// by hand: hidden (nothing to click) and collapsed (too small to use). A minimized
-// window is left alone — that is a user choice. Logs only on change.
+// Report the window's state, and repair the one state the operator cannot recover from
+// by hand: collapsed (too small to use). A window that is not visible is logged and
+// left alone: the user sends windows to the tray (RBTray), which reads as not visible,
+// and re-showing it every 15 s would undo that choice. Execkee itself cannot hide this
+// window (adapter hideWindow refuses the primary's handle). A minimized window is also
+// a user choice. Logs only on change.
 function checkPrimaryWindow() {
   if (!primaryHwnd) return;
   const script = `$ErrorActionPreference = 'Stop'
@@ -463,19 +465,7 @@ $r = New-Object EK.Win+RECT
 $w = $r.Right - $r.Left
 $t = $r.Bottom - $r.Top
 $fixed = ''
-if (-not $vis) {
-  # Re-show, then VERIFY. Never report a repair that did not take: SW_SHOW is the
-  # right verb for a window hidden with SW_HIDE, but fall back rather than claim
-  # success, and let the log say 'STILL-HIDDEN' if none of them work.
-  foreach ($verb in 5, 9, 1) {
-    [void][EK.Win]::ShowWindow($h, $verb)
-    Start-Sleep -Milliseconds 150
-    $vis = [EK.Win]::IsWindowVisible($h)
-    if ($vis) { $fixed += "RESHOWN($verb) "; break }
-  }
-  if (-not $vis) { $fixed += 'STILL-HIDDEN ' }
-}
-if (-not $ico -and ($w -lt 500 -or $t -lt 400)) {
+if ($vis -and -not $ico -and ($w -lt 500 -or $t -lt 400)) {
   $sw = [EK.Win]::GetSystemMetrics(0)
   $sh = [EK.Win]::GetSystemMetrics(1)
   $nw = [Math]::Min(1200, $sw)
@@ -744,6 +734,20 @@ Two different "stop" actions — choose by what the user means:
   session is **preserved on disk and can be re-adopted (resumed) later** via \`manage\`.
   (An instance you *created* fresh, with no captured session, can't be resumed once
   closed.) Confirm before closing, since it shuts a live window.
+
+## Window visibility is the user's business
+
+Execkee records an instance as \`foreground\` or \`hidden\`. That record says what
+Execkee last did. It does not say what is on screen now: the user moves windows to the
+system tray (RBTray), minimizes them, and covers them, and a window in the tray reads
+as not visible to Windows.
+
+- Do **not** audit window visibility on your own initiative (no window enumeration,
+  no \`IsWindowVisible\` checks) after a command that succeeded.
+- Do **not** re-show a window, and do **not** ask about one, because it is recorded
+  \`foreground\` but is not visible. Assume the user put it away.
+- Check or show a window only when the user asks about **that** window ("pull up X",
+  "where is X"), or when \`foreground\` itself reports a failure.
 
 ## Sensitive mode (privacy screen for the browser dashboard)
 
