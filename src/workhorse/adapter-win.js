@@ -201,8 +201,14 @@ switch ($Action) {
                     [ExeckeeWin32]::MoveWindow($hwnd, $newX, $newY, $newW, $newH, $true) | Out-Null
                 }
             }
-            [ExeckeeWin32]::SetForegroundWindow($hwnd) | Out-Null
-            Write-Output "ok"
+            # Report what happened, not what was asked for: "ok" only when the window
+            # is on screen. A hidden result makes foreground fail instead of lie.
+            if ([ExeckeeWin32]::IsWindowVisible($hwnd)) {
+                [ExeckeeWin32]::SetForegroundWindow($hwnd) | Out-Null
+                Write-Output "ok"
+            } else {
+                Write-Output "hidden"
+            }
         } else {
             Write-Output "no-window"
         }

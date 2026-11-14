@@ -230,7 +230,7 @@ export class InstanceManager {
       return { success: false, error: 'No managed window to foreground (externally held or not launched)' };
     }
     const shown = adapter.showWindow(inst.windowHandle); // adapter call outside the lock
-    if (!shown) return { success: false, error: 'Window could not be shown (it may have exited)' };
+    if (!shown) return { success: false, error: 'Window could not be shown (it is still hidden, or it has exited)' };
     mutateTracking(t => { if (!t.instances[instanceId]) return false; updateInstance(t, instanceId, { visibility: VISIBILITY.FOREGROUND }); });
     return { success: true };
   }
